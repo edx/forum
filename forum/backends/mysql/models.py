@@ -16,6 +16,36 @@ from django.utils.translation import gettext_lazy as _
 from forum.utils import validate_upvote_or_downvote
 
 
+class ContentManager(models.Manager):
+    """Custom manager for Content model to handle soft delete filtering."""
+    
+    def active(self):
+        """Return only non-deleted content."""
+        return self.filter(is_deleted=False)
+    
+    def deleted(self):
+        """Return only deleted content."""
+        return self.filter(is_deleted=True)
+    
+    def bulk_soft_delete(self, queryset, user: User) -> int:
+        """Bulk soft delete content."""
+        count = queryset.filter(is_deleted=False).update(
+            is_deleted=True,
+            deleted_at=timezone.now(),
+            deleted_by=user
+        )
+        return count
+    
+    def bulk_restore(self, queryset) -> int:
+        """Bulk restore content."""
+        count = queryset.filter(is_deleted=True).update(
+            is_deleted=False,
+            deleted_at=None,
+            deleted_by=None
+        )
+        return count
+
+
 class ForumUser(models.Model):
     """Forum user model."""
 
@@ -113,11 +143,25 @@ class Content(models.Model):
     updated_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(
         auto_now=True
     )
+    # Soft delete fields
+    is_deleted: models.BooleanField[bool, bool] = models.BooleanField(default=False)
+    deleted_at: models.DateTimeField[Optional[datetime], datetime] = models.DateTimeField(
+        null=True, blank=True
+    )
+    deleted_by: models.ForeignKey[User, User] = models.ForeignKey(
+        User,
+        related_name="%(class)s_deleted",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     uservote = GenericRelation(
         "UserVote",
         object_id_field="content_object_id",
         content_type_field="content_type",
     )
+
+    objects = ContentManager()
 
     @property
     def type(self) -> str:
@@ -183,6 +227,28 @@ class Content(models.Model):
             votes["point"] = votes["up_count"] - votes["down_count"]
             votes["count"] = votes["count"]
         return votes
+
+    def soft_delete(self, user: User) -> bool:
+        """Soft delete this content."""
+        if self.is_deleted:
+            return False
+        
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+        self.deleted_by = user
+        self.save(update_fields=['is_deleted', 'deleted_at', 'deleted_by'])
+        return True
+    
+    def restore(self) -> bool:
+        """Restore this soft deleted content."""
+        if not self.is_deleted:
+            return False
+        
+        self.is_deleted = False
+        self.deleted_at = None
+        self.deleted_by = None
+        self.save(update_fields=['is_deleted', 'deleted_at', 'deleted_by'])
+        return True
 
     def to_dict(self) -> dict[str, Any]:
         """Return a dictionary representation of the content."""
@@ -294,6 +360,9 @@ class CommentThread(Content):
             "last_activity_at": self.last_activity_at,
             "edit_history": edit_history,
             "group_id": self.group_id,
+            "is_deleted": self.is_deleted,
+            "deleted_at": self.deleted_at,
+            "deleted_by": str(self.deleted_by.pk) if self.deleted_by else None,
         }
 
     def doc_to_hash(self) -> dict[str, Any]:
@@ -317,6 +386,7 @@ class CommentThread(Content):
             "author_id": str(self.author.pk),
             "group_id": self.group_id,
             "thread_id": str(self.pk),
+            "is_deleted": self.is_deleted,
         }
 
     class Meta:
@@ -329,6 +399,7 @@ class CommentThread(Content):
             models.Index(
                 fields=["author", "course_id", "anonymous", "anonymous_to_peers"]
             ),
+            models.Index(fields=["is_deleted"]),  # Index for soft delete filtering
         ]
 
 

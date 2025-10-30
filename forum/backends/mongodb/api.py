@@ -555,6 +555,7 @@ class MongoBackend(AbstractBackend):
         raw_query: bool = False,
         commentable_ids: Optional[list[str]] = None,
         is_moderator: bool = False,
+        include_deleted: bool = False,
     ) -> dict[str, Any]:
         """
         Handles complex thread queries based on various filters and returns paginated results.
@@ -597,6 +598,15 @@ class MongoBackend(AbstractBackend):
             "_id": {"$in": comment_thread_obj_ids},
             "context": context,
         }
+
+        # Soft delete filtering
+        print(f"[MONGO DEBUG] include_deleted={include_deleted} (type: {type(include_deleted)})")
+        if not include_deleted:
+            base_query["is_deleted"] = {"$ne": True}
+            print(f"[MONGO DEBUG] Adding is_deleted filter to exclude deleted threads")
+        else:
+            print(f"[MONGO DEBUG] NOT filtering deleted threads - including all")
+        print(f"[MONGO DEBUG] Final base_query: {base_query}")
 
         # Group filtering
         if group_ids:
@@ -1353,6 +1363,9 @@ class MongoBackend(AbstractBackend):
         course_stats = user.get("course_stats", [])
         for stat in course_stats:
             if stat["course_id"] == course_id:
+                # Ensure deleted_count field exists
+                if "deleted_count" not in stat:
+                    stat["deleted_count"] = 0
                 return stat
 
         course_stat = {
@@ -1362,6 +1375,7 @@ class MongoBackend(AbstractBackend):
             "threads": 0,
             "responses": 0,
             "replies": 0,
+            "deleted_count": 0,
             "course_id": course_id,
             "last_activity_at": "",
         }
@@ -1389,6 +1403,7 @@ class MongoBackend(AbstractBackend):
         user = Users().get(author_id)
         if not user:
             raise ObjectDoesNotExist
+        # Pipeline for active (non-deleted) content
         pipeline = [
             {
                 "$match": {
@@ -1396,6 +1411,11 @@ class MongoBackend(AbstractBackend):
                     "author_id": user["external_id"],
                     "anonymous_to_peers": False,
                     "anonymous": False,
+                    # Exclude soft-deleted content from active stats
+                    "$or": [
+                        {"is_deleted": {"$exists": False}},
+                        {"is_deleted": False}
+                    ]
                 }
             },
             {
@@ -1432,12 +1452,29 @@ class MongoBackend(AbstractBackend):
             },
         ]
 
+        # Pipeline for deleted content count
+        deleted_pipeline = [
+            {
+                "$match": {
+                    "course_id": course_id,
+                    "author_id": user["external_id"],
+                    "is_deleted": True
+                }
+            },
+            {
+                "$count": "deleted_count"
+            }
+        ]
+
         data = list(Contents().aggregate(pipeline))
+        deleted_data = list(Contents().aggregate(deleted_pipeline))
+        
         active_flags = 0
         inactive_flags = 0
         threads = 0
         responses = 0
         replies = 0
+        deleted_count = deleted_data[0]["deleted_count"] if deleted_data else 0
         updated_at = datetime.utcfromtimestamp(0)
 
         for counts in data:
@@ -1461,6 +1498,7 @@ class MongoBackend(AbstractBackend):
         stats["threads"] = threads
         stats["active_flags"] = active_flags
         stats["inactive_flags"] = inactive_flags
+        stats["deleted_count"] = deleted_count
         stats["last_activity_at"] = updated_at
         cls.update_user_stats_for_course(user["external_id"], stats)
 
@@ -1535,6 +1573,16 @@ class MongoBackend(AbstractBackend):
         Comment().delete(comment_id)
 
     @staticmethod
+    def soft_delete_comment(comment_id: str, user_id: str) -> int:
+        """Soft delete comment."""
+        return Comment().soft_delete(comment_id, user_id)
+
+    @staticmethod
+    def restore_comment(comment_id: str) -> int:
+        """Restore soft deleted comment."""
+        return Comment().restore(comment_id)
+
+    @staticmethod
     def get_thread_id_from_comment(comment_id: str) -> dict[str, Any] | None:
         """Return thread_id from comment_id."""
         parent_comment = Comment().get(comment_id)
@@ -1566,6 +1614,41 @@ class MongoBackend(AbstractBackend):
     def delete_thread(thread_id: str) -> int:
         """Delete thread."""
         return CommentThread().delete(thread_id)
+
+    @staticmethod
+    def soft_delete_thread(thread_id: str, user_id: str) -> int:
+        """Soft delete thread."""
+        return CommentThread().soft_delete(thread_id, user_id)
+
+    @staticmethod
+    def restore_thread(thread_id: str) -> int:
+        """Restore soft deleted thread."""
+        return CommentThread().restore(thread_id)
+
+    @staticmethod
+    def bulk_soft_delete_threads(thread_ids: list[str], user_id: str) -> int:
+        """Bulk soft delete threads."""
+        return CommentThread().bulk_soft_delete(thread_ids, user_id)
+
+    @staticmethod
+    def bulk_restore_threads(thread_ids: list[str]) -> int:
+        """Bulk restore soft deleted threads."""
+        return CommentThread().bulk_restore(thread_ids)
+
+    @staticmethod
+    def get_deleted_list(
+        resp_skip: int = 0,
+        resp_limit: Optional[int] = None,
+        sort: Optional[str] = None,
+        **kwargs: Any
+    ):
+        """Get list of soft deleted threads."""
+        return CommentThread().get_deleted_list(
+            resp_skip=resp_skip,
+            resp_limit=resp_limit,
+            sort=sort,
+            **kwargs
+        )
 
     @staticmethod
     def create_thread(data: dict[str, Any]) -> str:

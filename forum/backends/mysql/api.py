@@ -608,6 +608,7 @@ class MySQLBackend(AbstractBackend):
         raw_query: bool = False,
         commentable_ids: Optional[list[str]] = None,
         is_moderator: bool = False,
+        is_deleted: Optional[bool] = None,
     ) -> dict[str, Any]:
         """
         Handles complex thread queries based on various filters and returns paginated results.
@@ -673,6 +674,16 @@ class MySQLBackend(AbstractBackend):
         # Thread type filtering
         if thread_type:
             base_query = base_query.filter(thread_type=thread_type)
+
+        # Soft delete filtering
+        print(f"[DEBUG] handle_threads_query: is_deleted={is_deleted}, base_query count before filtering: {base_query.count()}")
+        if is_deleted is not None:
+            base_query = base_query.filter(is_deleted=is_deleted)
+            print(f"[DEBUG] handle_threads_query: After filtering is_deleted={is_deleted}, count: {base_query.count()}")
+        else:
+            # Default to active threads only
+            base_query = base_query.filter(is_deleted=False)
+            print(f"[DEBUG] handle_threads_query: After filtering is_deleted=False (default), count: {base_query.count()}")
 
         # Flagged content filtering
         if filter_flagged:
@@ -1083,6 +1094,7 @@ class MySQLBackend(AbstractBackend):
             int(params.get("per_page", 100)),
             commentable_ids=params.get("commentable_ids", []),
             is_moderator=params.get("is_moderator", False),
+            is_deleted=params.get("is_deleted"),
         )
         context: dict[str, Any] = {
             "count_flagged": count_flagged,
@@ -2137,6 +2149,13 @@ class MySQLBackend(AbstractBackend):
         Returns:
             A list of comments and comment threads.
         """
+        # Extract show_deleted/include_deleted parameter
+        show_deleted = kwargs.pop("show_deleted", False)
+        include_deleted = kwargs.pop("include_deleted", False)
+        
+        # Determine if we should include deleted content
+        filter_deleted = show_deleted or include_deleted
+        
         comment_filters = {
             key: value for key, value in kwargs.items() if hasattr(Comment, key)
         }
@@ -2144,8 +2163,23 @@ class MySQLBackend(AbstractBackend):
             key: value for key, value in kwargs.items() if hasattr(CommentThread, key)
         }
 
-        comments = Comment.objects.filter(**comment_filters)
-        threads = CommentThread.objects.filter(**thread_filters)
+        # Use appropriate manager based on deletion filter
+        print(f"[DEBUG] get_contents: show_deleted={show_deleted}, include_deleted={include_deleted}")
+        if show_deleted:
+            # Only show deleted content
+            comments = Comment.objects.deleted().filter(**comment_filters)
+            threads = CommentThread.objects.deleted().filter(**thread_filters)
+            print(f"[DEBUG] get_contents: Using deleted() manager - comments: {comments.count()}, threads: {threads.count()}")
+        elif include_deleted:
+            # Show all content (active + deleted)
+            comments = Comment.objects.all().filter(**comment_filters)
+            threads = CommentThread.objects.all().filter(**thread_filters)
+            print(f"[DEBUG] get_contents: Using all() manager - comments: {comments.count()}, threads: {threads.count()}")
+        else:
+            # Only show active content (default behavior)
+            comments = Comment.objects.active().filter(**comment_filters)
+            threads = CommentThread.objects.active().filter(**thread_filters)
+            print(f"[DEBUG] get_contents: Using active() manager - comments: {comments.count()}, threads: {threads.count()}")
 
         sort_key = kwargs.get("sort_key")
         if sort_key:
@@ -2200,3 +2234,85 @@ class MySQLBackend(AbstractBackend):
             for thread in CommentThread.objects.filter(author__username=username)
         ]
         return contents
+
+    @staticmethod
+    def soft_delete_thread(thread_id: str, user: User) -> bool:
+        """Soft delete thread from thread_id."""
+        try:
+            thread = CommentThread.objects.get(pk=thread_id)
+            return thread.soft_delete(user)
+        except ObjectDoesNotExist:
+            return False
+
+    @staticmethod
+    def restore_thread(thread_id: str) -> bool:
+        """Restore soft deleted thread from thread_id."""
+        try:
+            thread = CommentThread.objects.get(pk=thread_id)
+            return thread.restore()
+        except ObjectDoesNotExist:
+            return False
+
+    @staticmethod
+    def bulk_soft_delete_threads(thread_ids: list[str], user: User) -> int:
+        """Bulk soft delete threads."""
+        queryset = CommentThread.objects.filter(pk__in=thread_ids)
+        return CommentThread.objects.bulk_soft_delete(queryset, user)
+
+    @staticmethod
+    def bulk_restore_threads(thread_ids: list[str]) -> int:
+        """Bulk restore soft deleted threads."""
+        queryset = CommentThread.objects.filter(pk__in=thread_ids)
+        return CommentThread.objects.bulk_restore(queryset)
+
+    @staticmethod
+    def get_deleted_list(
+        resp_skip: int = 0,
+        resp_limit: Optional[int] = 20,
+        sort: str = "date",
+        **filters: Any
+    ) -> list[dict[str, Any]]:
+        """
+        Get a list of soft deleted threads with pagination.
+        
+        Args:
+            resp_skip: Number of threads to skip (for pagination)
+            resp_limit: Maximum number of threads to return (None for no limit)
+            sort: Sort order ('date', 'activity', 'votes', etc.)
+            **filters: Additional filters (course_id, author_id, etc.)
+            
+        Returns:
+            List of deleted thread dictionaries
+        """
+        # Start with deleted threads only
+        queryset = CommentThread.objects.deleted()
+        
+        # Apply filters
+        if 'course_id' in filters:
+            queryset = queryset.filter(course_id=filters['course_id'])
+        if 'author_id' in filters:
+            queryset = queryset.filter(author_id=filters['author_id'])
+        if 'commentable_id' in filters:
+            queryset = queryset.filter(commentable_id=filters['commentable_id'])
+            
+        # Apply sorting
+        sort_criteria = MySQLBackend.get_sort_criteria(sort)
+        if sort_criteria:
+            queryset = queryset.order_by(*sort_criteria)
+        else:
+            # Default to most recently deleted first
+            queryset = queryset.order_by('-deleted_at', '-created_at')
+            
+        # Apply pagination
+        if resp_limit is not None:
+            queryset = queryset[resp_skip:resp_skip + resp_limit]
+        else:
+            queryset = queryset[resp_skip:]
+        
+        # Convert to dictionaries
+        threads = []
+        for thread in queryset:
+            thread_dict = thread.to_dict()
+            threads.append(thread_dict)
+            
+        return threads

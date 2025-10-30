@@ -195,6 +195,265 @@ def delete_thread(thread_id: str, course_id: Optional[str] = None) -> dict[str, 
     return serialized_data
 
 
+def soft_delete_thread(
+    thread_id: str, user_id: str, course_id: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Soft delete the thread for the given thread_id.
+
+    Parameters:
+        thread_id: The ID of the thread to be soft deleted.
+        user_id: The ID of the user performing the soft delete.
+        course_id: The course ID for backend selection.
+
+    Response:
+        The details of the thread that is soft deleted.
+    """
+    backend = get_backend(course_id)()
+    try:
+        thread = backend.validate_object("CommentThread", thread_id)
+    except ObjectDoesNotExist as exc:
+        log.error("Forumv2RequestError for soft delete thread request.")
+        raise ForumV2RequestError(
+            f"Thread does not exist with Id: {thread_id}"
+        ) from exc
+
+    # Check if already soft deleted
+    if thread.get("is_deleted"):
+        raise ForumV2RequestError(f"Thread {thread_id} is already deleted")
+
+    result = backend.soft_delete_thread(thread_id, user_id)
+    if result == 0:
+        raise ForumV2RequestError(f"Failed to soft delete thread {thread_id}")
+
+    # Update user stats: decrement threads count, increment deleted count
+    author_id = thread.get("author_id")
+    thread_course_id = thread.get("course_id")
+    if author_id and thread_course_id:
+        backend.update_stats_for_course(author_id, thread_course_id, threads=-1, deleted_count=1)
+
+    # Get updated thread data
+    updated_thread = backend.validate_object("CommentThread", thread_id)
+    try:
+        serialized_data = prepare_thread_api_response(updated_thread, backend)
+    except ValidationError as error:
+        log.error(f"Validation error in soft_delete_thread: {error}")
+        raise ForumV2RequestError("Failed to prepare thread API response") from error
+
+    return serialized_data
+
+
+def restore_thread(
+    thread_id: str, course_id: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Restore a soft deleted thread for the given thread_id.
+
+    Parameters:
+        thread_id: The ID of the thread to be restored.
+        course_id: The course ID for backend selection.
+
+    Response:
+        The details of the thread that is restored.
+    """
+    backend = get_backend(course_id)()
+    try:
+        thread = backend.validate_object("CommentThread", thread_id)
+    except ObjectDoesNotExist as exc:
+        log.error("Forumv2RequestError for restore thread request.")
+        raise ForumV2RequestError(
+            f"Thread does not exist with Id: {thread_id}"
+        ) from exc
+
+    # Check if not soft deleted
+    if not thread.get("is_deleted"):
+        raise ForumV2RequestError(f"Thread {thread_id} is not deleted")
+
+    result = backend.restore_thread(thread_id)
+    if result == 0:
+        raise ForumV2RequestError(f"Failed to restore thread {thread_id}")
+
+    # Update user stats: increment threads count, decrement deleted count
+    author_id = thread.get("author_id")
+    thread_course_id = thread.get("course_id")
+    if author_id and thread_course_id:
+        backend.update_stats_for_course(author_id, thread_course_id, threads=1, deleted_count=-1)
+
+    # Get updated thread data
+    updated_thread = backend.validate_object("CommentThread", thread_id)
+    try:
+        serialized_data = prepare_thread_api_response(updated_thread, backend)
+    except ValidationError as error:
+        log.error(f"Validation error in restore_thread: {error}")
+        raise ForumV2RequestError("Failed to prepare thread API response") from error
+
+    return serialized_data
+
+
+def bulk_soft_delete_threads(
+    thread_ids: list[str], user_id: str, course_id: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Bulk soft delete threads for the given thread_ids.
+
+    Parameters:
+        thread_ids: List of thread IDs to be soft deleted.
+        user_id: The ID of the user performing the soft delete.
+        course_id: The course ID for backend selection.
+
+    Response:
+        Dictionary with success count and any errors.
+    """
+    backend = get_backend(course_id)()
+    
+    # Validate all threads exist and are not already deleted
+    # Also collect author info for stats updates
+    valid_thread_ids = []
+    thread_authors = {}  # {thread_id: author_id}
+    errors = []
+    
+    for thread_id in thread_ids:
+        try:
+            thread = backend.validate_object("CommentThread", thread_id)
+            if thread.get("is_deleted"):
+                errors.append(f"Thread {thread_id} is already deleted")
+            else:
+                valid_thread_ids.append(thread_id)
+                thread_authors[thread_id] = thread.get("author_id")
+        except ObjectDoesNotExist:
+            errors.append(f"Thread does not exist with Id: {thread_id}")
+
+    if not valid_thread_ids:
+        raise ForumV2RequestError("No valid threads to soft delete")
+
+    result = backend.bulk_soft_delete_threads(valid_thread_ids, user_id)
+    
+    # Update stats for each author
+    for thread_id in valid_thread_ids:
+        author_id = thread_authors.get(thread_id)
+        if author_id and course_id:
+            try:
+                backend.update_stats_for_course(
+                    author_id, course_id, threads=-1, deleted_count=1
+                )
+            except Exception as e:
+                log.warning(f"Failed to update stats for thread {thread_id}: {e}")
+    
+    return {
+        "success_count": result,
+        "errors": errors,
+        "processed_threads": valid_thread_ids,
+    }
+
+
+def bulk_restore_threads(
+    thread_ids: list[str], course_id: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Bulk restore soft deleted threads for the given thread_ids.
+
+    Parameters:
+        thread_ids: List of thread IDs to be restored.
+        course_id: The course ID for backend selection.
+
+    Response:
+        Dictionary with success count and any errors.
+    """
+    backend = get_backend(course_id)()
+    
+    # Validate all threads exist and are soft deleted
+    # Also collect author info for stats updates
+    valid_thread_ids = []
+    thread_authors = {}  # {thread_id: author_id}
+    errors = []
+    
+    for thread_id in thread_ids:
+        try:
+            thread = backend.validate_object("CommentThread", thread_id)
+            if not thread.get("is_deleted"):
+                errors.append(f"Thread {thread_id} is not deleted")
+            else:
+                valid_thread_ids.append(thread_id)
+                thread_authors[thread_id] = thread.get("author_id")
+        except ObjectDoesNotExist:
+            errors.append(f"Thread does not exist with Id: {thread_id}")
+
+    if not valid_thread_ids:
+        raise ForumV2RequestError("No valid threads to restore")
+
+    result = backend.bulk_restore_threads(valid_thread_ids)
+    
+    # Update stats for each author
+    for thread_id in valid_thread_ids:
+        author_id = thread_authors.get(thread_id)
+        if author_id and course_id:
+            try:
+                backend.update_stats_for_course(
+                    author_id, course_id, threads=1, deleted_count=-1
+                )
+            except Exception as e:
+                log.warning(f"Failed to update stats for thread {thread_id}: {e}")
+    
+    return {
+        "success_count": result,
+        "errors": errors,
+        "processed_threads": valid_thread_ids,
+    }
+
+
+def get_deleted_threads(
+    course_id: str,
+    user_id: Optional[str] = None,
+    resp_skip: int = 0,
+    resp_limit: Optional[int] = None,
+    sort_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Get soft deleted threads for a course.
+
+    Parameters:
+        course_id: The course ID.
+        user_id: Optional user ID to filter by author.
+        resp_skip: Number of threads to skip for pagination.
+        resp_limit: Maximum number of threads to return.
+        sort_key: Sort key for ordering results.
+
+    Response:
+        Dictionary with deleted threads and pagination info.
+    """
+    backend = get_backend(course_id)()
+    
+    filters = {"course_id": course_id}
+    if user_id:
+        filters["author_id"] = user_id
+    
+    threads_cursor = backend.get_deleted_list(
+        resp_skip=resp_skip,
+        resp_limit=resp_limit,
+        sort=sort_key,
+        **filters
+    )
+    
+    threads = []
+    for thread in threads_cursor:
+        try:
+            serialized_thread = prepare_thread_api_response(thread, backend)
+            threads.append(serialized_thread)
+        except ValidationError as error:
+            log.error(f"Validation error in get_deleted_threads for thread {thread.get('_id', 'unknown')}: {error}")
+            continue
+        except Exception as error:
+            log.error(f"Unexpected error in get_deleted_threads for thread {thread.get('_id', 'unknown')}: {error}")
+            continue
+    
+    return {
+        "threads": threads,
+        "count": len(threads),
+        "skip": resp_skip,
+        "limit": resp_limit,
+    }
+
+
 def update_thread(
     thread_id: str,
     title: Optional[str] = None,
@@ -362,6 +621,7 @@ def get_user_threads(
     user_id: Optional[str] = None,
     group_id: Optional[int] = None,
     group_ids: Optional[int] = None,
+    is_deleted: Optional[bool] = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """
@@ -385,6 +645,7 @@ def get_user_threads(
         "user_id": user_id,
         "group_id": group_id,
         "group_ids": group_ids,
+        "is_deleted": is_deleted,
     }
     params = {k: v for k, v in params.items() if v is not None}
     backend.validate_params(params)
@@ -411,3 +672,139 @@ def get_course_id_by_thread(thread_id: str) -> str | None:
         or MySQLBackend.get_course_id_by_thread_id(thread_id)
         or None
     )
+
+
+def soft_delete_thread(thread_id: str, user_id: str, course_id: Optional[str] = None) -> dict[str, Any]:
+    """
+    Soft delete the thread for the given thread_id.
+
+    Parameters:
+        thread_id: The ID of the thread to be soft deleted.
+        user_id: The ID of the user performing the soft delete.
+        course_id: Optional course ID for backend selection.
+    Response:
+        The details of the thread that is soft deleted.
+    """
+    backend = get_backend(course_id)()
+    try:
+        thread = backend.validate_object("CommentThread", thread_id)
+    except ObjectDoesNotExist as exc:
+        log.error("ForumV2RequestError for soft delete thread request.")
+        raise ForumV2RequestError(
+            f"Thread does not exist with Id: {thread_id}"
+        ) from exc
+
+    if thread.get("is_deleted", False):
+        raise ForumV2RequestError(f"Thread {thread_id} is already deleted")
+
+    # Get user for soft delete
+    from django.contrib.auth.models import User
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist as exc:
+        raise ForumV2RequestError(f"User does not exist with Id: {user_id}") from exc
+    
+    # Perform soft delete
+    success = backend.soft_delete_thread(thread_id, user)
+    if not success:
+        raise ForumV2RequestError(f"Failed to soft delete thread {thread_id}")
+
+    # Return updated thread data
+    updated_thread = backend.validate_object("CommentThread", thread_id)
+    try:
+        return prepare_thread_api_response(updated_thread, backend)
+    except ValidationError as error:
+        log.error(f"Validation error in soft_delete_thread: {error}")
+        raise ForumV2RequestError("Failed to prepare thread API response") from error
+
+
+def restore_thread(thread_id: str, course_id: Optional[str] = None) -> dict[str, Any]:
+    """
+    Restore a soft deleted thread for the given thread_id.
+
+    Parameters:
+        thread_id: The ID of the thread to be restored.
+        course_id: Optional course ID for backend selection.
+    Response:
+        The details of the thread that is restored.
+    """
+    backend = get_backend(course_id)()
+    try:
+        thread = backend.validate_object("CommentThread", thread_id)
+    except ObjectDoesNotExist as exc:
+        log.error("ForumV2RequestError for restore thread request.")
+        raise ForumV2RequestError(
+            f"Thread does not exist with Id: {thread_id}"
+        ) from exc
+
+    if not thread.get("is_deleted", False):
+        raise ForumV2RequestError(f"Thread {thread_id} is not deleted")
+
+    # Perform restore
+    success = backend.restore_thread(thread_id)
+    if not success:
+        raise ForumV2RequestError(f"Failed to restore thread {thread_id}")
+
+    # Return updated thread data
+    updated_thread = backend.validate_object("CommentThread", thread_id)
+    try:
+        return prepare_thread_api_response(updated_thread, backend)
+    except ValidationError as error:
+        log.error(f"Validation error in restore_thread: {error}")
+        raise ForumV2RequestError("Failed to prepare thread API response") from error
+
+
+def bulk_soft_delete_threads(thread_ids: list[str], user_id: str, course_id: Optional[str] = None) -> dict[str, Any]:
+    """
+    Bulk soft delete threads for the given thread_ids.
+
+    Parameters:
+        thread_ids: List of thread IDs to be soft deleted.
+        user_id: The ID of the user performing the soft delete.
+        course_id: Optional course ID for backend selection.
+    Response:
+        Count of threads that were soft deleted.
+    """
+    if not thread_ids:
+        raise ForumV2RequestError("No thread IDs provided")
+
+    backend = get_backend(course_id)()
+    
+    # Get user for soft delete
+    from django.contrib.auth.models import User
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist as exc:
+        raise ForumV2RequestError(f"User does not exist with Id: {user_id}") from exc
+    
+    # Perform bulk soft delete
+    try:
+        count = backend.bulk_soft_delete_threads(thread_ids, user)
+        return {"deleted_count": count}
+    except Exception as exc:
+        log.error(f"Error in bulk_soft_delete_threads: {exc}")
+        raise ForumV2RequestError("Failed to bulk soft delete threads") from exc
+
+
+def bulk_restore_threads(thread_ids: list[str], course_id: Optional[str] = None) -> dict[str, Any]:
+    """
+    Bulk restore soft deleted threads for the given thread_ids.
+
+    Parameters:
+        thread_ids: List of thread IDs to be restored.
+        course_id: Optional course ID for backend selection.
+    Response:
+        Count of threads that were restored.
+    """
+    if not thread_ids:
+        raise ForumV2RequestError("No thread IDs provided")
+
+    backend = get_backend(course_id)()
+    
+    # Perform bulk restore
+    try:
+        count = backend.bulk_restore_threads(thread_ids)
+        return {"restored_count": count}
+    except Exception as exc:
+        log.error(f"Error in bulk_restore_threads: {exc}")
+        raise ForumV2RequestError("Failed to bulk restore threads") from exc

@@ -198,20 +198,30 @@ def get_user_active_threads(
     per_page: Optional[int] = FORUM_DEFAULT_PER_PAGE,
     group_id: Optional[str] = None,
     is_moderator: Optional[bool] = False,
+    show_deleted: Optional[bool] = False,
 ) -> dict[str, Any]:
     """Get user active threads."""
     backend = get_backend(course_id)()
     raw_query = bool(sort_key == "user_activity")
     if not course_id:
         return {}
+    
+    # Debug logging
+    print(f"[FORUM DEBUG] get_user_active_threads called")
+    print(f"[FORUM DEBUG] show_deleted={show_deleted} (type: {type(show_deleted)})")
+    print(f"[FORUM DEBUG] user_id={user_id}, course_id={course_id}")
+    print(f"[FORUM DEBUG] flagged={flagged}, unread={unread}, unanswered={unanswered}, unresponded={unresponded}")
+    
     active_contents = list(
         backend.get_contents(
             author_id=user_id,
             anonymous=False,
             anonymous_to_peers=False,
             course_id=course_id,
+            include_deleted=True,  # Get all content, let handle_threads_query do the filtering
         )
     )
+    print(f"[FORUM DEBUG] Found {len(active_contents)} total contents for user")
 
     if flagged:
         active_contents = [
@@ -233,7 +243,27 @@ def get_user_active_threads(
         )
     )
 
-    params: dict[str, Any] = {
+    # Import backend check here to avoid circular imports
+    from forum.backend import is_mysql_backend_enabled
+    
+    # Use the correct parameter name and interpretation based on backend type
+    use_mysql_backend = is_mysql_backend_enabled(course_id)
+    
+    if use_mysql_backend:
+        # MySQL backend uses "is_deleted" parameter where:
+        # - is_deleted=True means show ONLY deleted threads
+        # - is_deleted=False means show ONLY active threads
+        # - is_deleted=None defaults to active threads
+        deleted_param_name = "is_deleted"
+        deleted_param_value = show_deleted  # Direct mapping: show_deleted=True -> is_deleted=True
+    else:
+        # MongoDB backend uses "include_deleted" parameter where:
+        # - include_deleted=True means include deleted threads WITH active ones
+        # - include_deleted=False means show only active threads
+        deleted_param_name = "include_deleted"
+        deleted_param_value = show_deleted  # For now, use same logic
+    
+    params = {
         "comment_thread_ids": active_thread_ids,
         "user_id": user_id,
         "course_id": course_id,
@@ -251,8 +281,23 @@ def get_user_active_threads(
         "context": "course",
         "raw_query": raw_query,
         "is_moderator": is_moderator,
+        deleted_param_name: deleted_param_value,
     }
+    
+    # Debug logging
+    print(f"[FORUM DEBUG] Using {backend.__class__.__name__} backend")
+    print(f"[FORUM DEBUG] show_deleted={show_deleted} -> {deleted_param_name}={deleted_param_value}")
+    print(f"[FORUM DEBUG] Calling handle_threads_query with thread_ids={len(active_thread_ids)}")
+    print(f"[FORUM DEBUG] Key params: {deleted_param_name}={params.get(deleted_param_name)}")
+    
     data = backend.handle_threads_query(**params)
+    
+    # Debug logging
+    print(f"[FORUM DEBUG] Calling handle_threads_query with include_deleted={show_deleted}, thread_ids={len(active_thread_ids)}")
+    print(f"[FORUM DEBUG] Key params: include_deleted={params.get('include_deleted')}")
+    
+    data = backend.handle_threads_query(**params)
+    print(f"[FORUM DEBUG] handle_threads_query returned: {len(data.get('collection', []))} threads")
 
     if collections := data.get("collection"):
         thread_serializer = ThreadSerializer(

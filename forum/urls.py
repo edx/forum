@@ -14,7 +14,14 @@ from forum.views.subscriptions import (
     ThreadSubscriptionAPIView,
     UserSubscriptionAPIView,
 )
-from forum.views.threads import CreateThreadAPIView, ThreadsAPIView, UserThreadsAPIView
+from forum.views.threads import (
+    BulkSoftDeleteThreadsAPIView,
+    CreateThreadAPIView,
+    DeletedThreadsAPIView,
+    SoftDeleteThreadAPIView,
+    ThreadsAPIView,
+    UserThreadsAPIView,
+)
 from forum.views.users import (
     UserActiveThreadsAPIView,
     UserAPIView,
@@ -100,10 +107,28 @@ api_patterns = [
         UserThreadsAPIView.as_view(),
         name="user-threads-api",
     ),
+    # Put specific routes BEFORE dynamic ones
+    path(
+        "threads/deleted",
+        DeletedThreadsAPIView.as_view(),
+        name="deleted-threads-api",
+    ),
+    path(
+        "threads/bulk-soft-delete",
+        BulkSoftDeleteThreadsAPIView.as_view(),
+        name="bulk-soft-delete-threads-api",
+    ),
+    # Dynamic routes come last
     path(
         "threads/<str:thread_id>",
         ThreadsAPIView.as_view(),
         name="threads-api",
+    ),
+    # soft delete thread APIs
+    path(
+        "threads/<str:thread_id>/soft-delete",
+        SoftDeleteThreadAPIView.as_view(),
+        name="soft-delete-thread-api",
     ),
     # commentables API
     path(

@@ -246,6 +246,107 @@ def delete_comment(comment_id: str, course_id: Optional[str] = None) -> dict[str
     return data
 
 
+def soft_delete_comment(
+    comment_id: str, user_id: str, course_id: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Soft delete the comment for the given comment_id.
+
+    Parameters:
+        comment_id: The ID of the comment to be soft deleted.
+        user_id: The ID of the user performing the soft delete.
+        course_id: The course ID for backend selection.
+
+    Response:
+        The details of the comment that is soft deleted.
+    """
+    backend = get_backend(course_id)()
+    try:
+        comment = backend.validate_object("Comment", comment_id)
+    except ObjectDoesNotExist as exc:
+        log.error("Forumv2RequestError for soft delete comment request.")
+        raise ForumV2RequestError(
+            f"Comment does not exist with Id: {comment_id}"
+        ) from exc
+
+    # Check if already soft deleted
+    if comment.get("is_deleted"):
+        raise ForumV2RequestError(f"Comment {comment_id} is already deleted")
+
+    result = backend.soft_delete_comment(comment_id, user_id)
+    if result == 0:
+        raise ForumV2RequestError(f"Failed to soft delete comment {comment_id}")
+
+    # Update user stats: decrement replies/responses count, increment deleted count
+    author_id = comment.get("author_id")
+    comment_course_id = comment.get("course_id")
+    parent_id = comment.get("parent_id")
+    
+    if author_id and comment_course_id:
+        if parent_id:  # It's a reply
+            backend.update_stats_for_course(author_id, comment_course_id, replies=-1, deleted_count=1)
+        else:  # It's a response
+            backend.update_stats_for_course(author_id, comment_course_id, responses=-1, deleted_count=1)
+
+    # Get updated comment data
+    updated_comment = backend.validate_object("Comment", comment_id)
+    return prepare_comment_api_response(
+        updated_comment,
+        backend,
+        exclude_fields=["endorsement", "sk"],
+    )
+
+
+def restore_comment(
+    comment_id: str, course_id: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Restore a soft deleted comment.
+
+    Parameters:
+        comment_id: The ID of the comment to be restored.
+        course_id: The course ID for backend selection.
+
+    Response:
+        The details of the comment that is restored.
+    """
+    backend = get_backend(course_id)()
+    try:
+        comment = backend.validate_object("Comment", comment_id)
+    except ObjectDoesNotExist as exc:
+        log.error("Forumv2RequestError for restore comment request.")
+        raise ForumV2RequestError(
+            f"Comment does not exist with Id: {comment_id}"
+        ) from exc
+
+    # Check if comment is actually deleted
+    if not comment.get("is_deleted"):
+        raise ForumV2RequestError(f"Comment {comment_id} is not deleted")
+
+    result = backend.restore_comment(comment_id)
+    if result == 0:
+        raise ForumV2RequestError(f"Failed to restore comment {comment_id}")
+
+    # Update user stats: increment replies/responses count, decrement deleted count
+    author_id = comment.get("author_id")
+    comment_course_id = comment.get("course_id")
+    parent_id = comment.get("parent_id")
+    
+    if author_id and comment_course_id:
+        if parent_id:  # It's a reply
+            backend.update_stats_for_course(author_id, comment_course_id, replies=1, deleted_count=-1)
+        else:  # It's a response
+            backend.update_stats_for_course(author_id, comment_course_id, responses=1, deleted_count=-1)
+
+    # Get updated comment data
+    updated_comment = backend.validate_object("Comment", comment_id)
+    return prepare_comment_api_response(
+        updated_comment,
+        backend,
+        exclude_fields=["endorsement", "sk"],
+    )
+
+
 def create_parent_comment(
     thread_id: str,
     body: str,

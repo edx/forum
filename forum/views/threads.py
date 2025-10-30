@@ -11,7 +11,6 @@ from rest_framework.views import APIView
 
 from forum.api.threads import (
     create_thread,
-    delete_thread,
     get_thread,
     get_user_threads,
     update_thread,
@@ -54,7 +53,7 @@ class ThreadsAPIView(APIView):
 
     def delete(self, request: Request, thread_id: str) -> Response:
         """
-        Deletes a thread by its ID.
+        Soft deletes a thread by its ID.
 
         Parameters:
             request (Request): The incoming request.
@@ -65,7 +64,11 @@ class ThreadsAPIView(APIView):
             The details of the thread that is deleted.
         """
         try:
-            serialized_data = delete_thread(thread_id)
+            # Use soft delete instead of hard delete
+            from forum.api.threads import soft_delete_thread
+            user_id = request.data.get('user_id') or getattr(request.user, 'id', None)
+            course_id = request.data.get('course_id')
+            serialized_data = soft_delete_thread(thread_id, user_id, course_id)
             return Response(serialized_data, status=status.HTTP_200_OK)
         except ForumV2RequestError as error:
             return Response(
@@ -160,6 +163,174 @@ class UserThreadsAPIView(APIView):
             serialized_data = get_user_threads(**params)
             return Response(serialized_data, status=status.HTTP_200_OK)
         except (TypeError, ValueError, ForumV2RequestError) as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class SoftDeleteThreadAPIView(APIView):
+    """API view for soft delete operations on threads."""
+
+    permission_classes = (AllowAny,)
+
+    def post(self, request: Request, thread_id: str) -> Response:
+        """
+        Soft delete a thread.
+
+        Args:
+            request: The HTTP request object.
+            thread_id: The ID of the thread to soft delete.
+
+        Returns:
+            Response: A Response object containing the updated thread data or an error message.
+        """
+        try:
+            user_id = request.data.get("user_id")
+            if not user_id:
+                return Response(
+                    {"error": "user_id is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            course_id = request.data.get("course_id")
+            from forum.api.threads import soft_delete_thread
+            data = soft_delete_thread(thread_id, user_id, course_id)
+            return Response(data, status=status.HTTP_200_OK)
+        except ForumV2RequestError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def delete(self, request: Request, thread_id: str) -> Response:
+        """
+        Restore a soft deleted thread.
+
+        Args:
+            request: The HTTP request object.
+            thread_id: The ID of the thread to restore.
+
+        Returns:
+            Response: A Response object containing the restored thread data or an error message.
+        """
+        try:
+            course_id = request.GET.get("course_id")
+            from forum.api.threads import restore_thread
+            data = restore_thread(thread_id, course_id)
+            return Response(data, status=status.HTTP_200_OK)
+        except ForumV2RequestError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class BulkSoftDeleteThreadsAPIView(APIView):
+    """API view for bulk soft delete operations on threads."""
+
+    permission_classes = (AllowAny,)
+
+    def post(self, request: Request) -> Response:
+        """
+        Bulk soft delete threads.
+
+        Args:
+            request: The HTTP request object containing thread_ids and user_id.
+
+        Returns:
+            Response: A Response object containing operation results.
+        """
+        try:
+            thread_ids = request.data.get("thread_ids", [])
+            user_id = request.data.get("user_id")
+            course_id = request.data.get("course_id")
+
+            if not thread_ids:
+                return Response(
+                    {"error": "thread_ids list is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not user_id:
+                return Response(
+                    {"error": "user_id is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            from forum.api.threads import bulk_soft_delete_threads
+            data = bulk_soft_delete_threads(thread_ids, user_id, course_id)
+            return Response(data, status=status.HTTP_200_OK)
+        except ForumV2RequestError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def delete(self, request: Request) -> Response:
+        """
+        Bulk restore soft deleted threads.
+
+        Args:
+            request: The HTTP request object containing thread_ids.
+
+        Returns:
+            Response: A Response object containing operation results.
+        """
+        try:
+            thread_ids = request.data.get("thread_ids", [])
+            course_id = request.data.get("course_id")
+
+            if not thread_ids:
+                return Response(
+                    {"error": "thread_ids list is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            from forum.api.threads import bulk_restore_threads
+            data = bulk_restore_threads(thread_ids, course_id)
+            return Response(data, status=status.HTTP_200_OK)
+        except ForumV2RequestError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class DeletedThreadsAPIView(APIView):
+    """API view for retrieving soft deleted threads."""
+
+    permission_classes = (AllowAny,)
+
+    def get(self, request: Request) -> Response:
+        """
+        Get soft deleted threads for a course.
+
+        Args:
+            request: The HTTP request object.
+
+        Returns:
+            Response: A Response object containing the deleted threads data.
+        """
+        try:
+            params = request.query_params.dict()
+            course_id = params.get("course_id")
+            
+            if not course_id:
+                return Response(
+                    {"error": "course_id is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            from forum.api.threads import get_deleted_threads
+            data = get_deleted_threads(
+                course_id=course_id,
+                user_id=params.get("user_id"),
+                resp_skip=int(params.get("resp_skip", 0)),
+                resp_limit=int(params.get("resp_limit")) if params.get("resp_limit") else None,
+                sort_key=params.get("sort_key"),
+            )
+            return Response(data, status=status.HTTP_200_OK)
+        except (ValueError, ForumV2RequestError) as error:
             return Response(
                 {"error": str(error)},
                 status=status.HTTP_400_BAD_REQUEST,
