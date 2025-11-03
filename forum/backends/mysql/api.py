@@ -1686,6 +1686,9 @@ class MySQLBackend(AbstractBackend):
                     vote=-1,
                 )
 
+        if "is_spam" in kwargs:
+            comment.is_spam = kwargs["is_spam"]
+
         comment.updated_at = timezone.now()
         comment.save()
         return 1
@@ -1897,6 +1900,9 @@ class MySQLBackend(AbstractBackend):
                     content_object_id=thread.pk,
                     vote=-1,
                 )
+
+        if "is_spam" in kwargs:
+            thread.is_spam = kwargs["is_spam"]
 
         thread.updated_at = timezone.now()
         thread.save()
@@ -2208,3 +2214,45 @@ class MySQLBackend(AbstractBackend):
             for thread in CommentThread.objects.filter(author__username=username)
         ]
         return contents
+
+    # AI Moderation Methods for MySQL
+    @classmethod
+    def flag_content_as_spam(cls, content_type: str, content_id: str) -> int:
+        """
+        Flag content as spam by adding AI system to abuse flaggers and updating spam fields.
+
+        Args:
+            content_type: Type of content ('CommentThread' or 'Comment')
+            content_id: ID of the content to flag
+            reason: Reason for flagging as spam
+
+        Returns:
+            Number of documents modified
+        """
+
+        # Use existing update methods to add AI system to abuse flaggers and set spam flag
+        update_data = {"is_spam": True}
+        if content_type == "CommentThread":
+            return cls.update_thread(content_id, **update_data)
+        else:
+            return cls.update_comment(content_id, **update_data)
+
+    @classmethod
+    def unflag_content_as_spam(cls, content_type: str, content_id: str) -> int:
+        """
+        Remove spam flag from content.
+
+        Args:
+            content_type: Type of content ('CommentThread' or 'Comment')
+            content_id: ID of the content to unflag
+
+        Returns:
+            Number of documents modified
+        """
+        # Just update the spam flag to False
+        update_data = {"is_spam": False}
+
+        if content_type == "CommentThread":
+            return cls.update_thread(content_id, **update_data)
+        else:
+            return cls.update_comment(content_id, **update_data)

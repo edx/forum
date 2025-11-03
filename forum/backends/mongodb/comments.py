@@ -78,6 +78,7 @@ class Comment(BaseContents):
         abuse_flaggers: Optional[list[str]] = None,
         historical_abuse_flaggers: Optional[list[str]] = None,
         visible: bool = True,
+        is_spam: bool = False,
     ) -> str:
         """
         Inserts a new comment document into the database.
@@ -94,7 +95,7 @@ class Comment(BaseContents):
             abuse_flaggers (Optional[list[str]], optional): Users who flagged the comment. Defaults to None.
             historical_abuse_flaggers (Optional[list[str]], optional): Users historically flagged the comment.
             visible (bool, optional): Whether the comment is visible. Defaults to True.
-
+            is_spam (bool, optional): Whether the comment has been flagged as spam by AI moderation. Defaults to False.
         Returns:
             str: The ID of the inserted document.
         """
@@ -104,6 +105,7 @@ class Comment(BaseContents):
             "visible": visible,
             "abuse_flaggers": abuse_flaggers or [],
             "historical_abuse_flaggers": historical_abuse_flaggers or [],
+            "is_spam": is_spam,
             "parent_ids": [ObjectId(parent_id)] if parent_id else [],
             "at_position_list": [],
             "body": body,
@@ -163,6 +165,7 @@ class Comment(BaseContents):
         edit_reason_code: Optional[str] = None,
         endorsement_user_id: Optional[str] = None,
         sk: Optional[str] = None,
+        is_spam: Optional[bool] = None,
     ) -> int:
         """
         Updates a comment document in the database.
@@ -206,6 +209,7 @@ class Comment(BaseContents):
             ("depth", depth),
             ("closed", closed),
             ("sk", sk),
+            ("is_spam", is_spam),
         ]
         update_data: dict[str, Any] = {
             field: value for field, value in fields if value is not None
