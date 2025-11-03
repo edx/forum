@@ -19,12 +19,13 @@ class CommentThread(BaseContents):
     content_type = "CommentThread"
 
     def delete(self, _id: str) -> int:
-        """Delete CommentThread"""
-        result = super().delete(_id)
+        """Soft delete CommentThread"""
+        # Use soft delete instead of hard delete
+        result = self.soft_delete(_id)
         get_handler_by_name("comment_thread_deleted").send(
             sender=self.__class__, comment_thread_id=_id
         )
-        Users().delete_read_state_by_thread_id(_id)
+        # Note: Keep read state for potential restoration
         return result
 
     @classmethod
@@ -58,6 +59,9 @@ class CommentThread(BaseContents):
                 "group_id": {"type": "integer"},
                 "id": {"type": "keyword"},
                 "thread_id": {"type": "keyword"},
+                "is_deleted": {"type": "boolean"},  # Soft delete mapping
+                "deleted_at": {"type": "date"},
+                "deleted_by": {"type": "keyword"},
             },
         }
 
@@ -81,6 +85,9 @@ class CommentThread(BaseContents):
             "author_id": doc.get("author_id"),
             "group_id": doc.get("group_id"),
             "thread_id": str(doc.get("_id")),
+            "is_deleted": doc.get("is_deleted", False),
+            "deleted_at": doc.get("deleted_at"),
+            "deleted_by": doc.get("deleted_by"),
         }
 
     def insert(
@@ -162,6 +169,9 @@ class CommentThread(BaseContents):
             "visible": visible,
             "abuse_flaggers": abuse_flaggers,
             "historical_abuse_flaggers": historical_abuse_flaggers,
+            "is_deleted": False,
+            "deleted_at": None,
+            "deleted_by": None,
         }
         if group_id:
             thread_data["group_id"] = group_id
@@ -291,6 +301,94 @@ class CommentThread(BaseContents):
         get_handler_by_name("comment_thread_updated").send(
             sender=self.__class__, comment_thread_id=thread_id
         )
+        return result.modified_count
+
+    def soft_delete(self, thread_id: str, user_id: str) -> int:
+        """Soft delete a thread"""
+        result = self._collection.update_one(
+            {"_id": ObjectId(thread_id), "is_deleted": {"$ne": True}},
+            {
+                "$set": {
+                    "is_deleted": True,
+                    "deleted_at": datetime.now(),
+                    "deleted_by": user_id,
+                }
+            },
+        )
+        
+        # Update Elasticsearch index to reflect the soft delete
+        if result.modified_count > 0:
+            from forum.search.es import ElasticsearchDocumentBackend
+            es_backend = ElasticsearchDocumentBackend()
+            es_backend.update_document(
+                index_name=self.index_name,
+                doc_id=thread_id,
+                update_data={"is_deleted": True}
+            )
+        
+        return result.modified_count
+
+    def restore(self, thread_id: str) -> int:
+        """Restore a soft deleted thread"""
+        result = self._collection.update_one(
+            {"_id": ObjectId(thread_id), "is_deleted": True},
+            {
+                "$unset": {
+                    "is_deleted": "",
+                    "deleted_at": "",
+                    "deleted_by": "",
+                }
+            },
+        )
+        
+        # Update Elasticsearch index to reflect the restore
+        if result.modified_count > 0:
+            from forum.search.es import ElasticsearchDocumentBackend
+            es_backend = ElasticsearchDocumentBackend()
+            es_backend.update_document(
+                index_name=self.index_name,
+                doc_id=thread_id,
+                update_data={"is_deleted": False}
+            )
+        
+        return result.modified_count
+
+    def bulk_soft_delete(self, thread_ids: list[str], user_id: str) -> int:
+        """Bulk soft delete threads"""
+        object_ids = [ObjectId(tid) for tid in thread_ids]
+        result = self._collection.update_many(
+            {"_id": {"$in": object_ids}, "is_deleted": {"$ne": True}},
+            {
+                "$set": {
+                    "is_deleted": True,
+                    "deleted_at": datetime.now(),
+                    "deleted_by": user_id,
+                }
+            },
+        )
+        
+        # Note: Elasticsearch indexing removed - not implemented in Forum V2
+        # TODO: Add ES integration if needed in the future
+        
+        return result.modified_count
+
+    def bulk_restore(self, thread_ids: list[str]) -> int:
+        """Bulk restore soft deleted threads"""
+        object_ids = [ObjectId(tid) for tid in thread_ids]
+        result = self._collection.update_many(
+            {"_id": {"$in": object_ids}, "is_deleted": True},
+            {
+                "$unset": {
+                    "is_deleted": "",
+                    "deleted_at": "",
+                    "deleted_by": "",
+                }
+            },
+        )
+        
+        # Note: Elasticsearch indexing removed - not implemented in Forum V2
+        # TODO: Add ES integration if needed in the future
+        
         return result.modified_count
 
     def get_author_username(self, author_id: str) -> str | None:

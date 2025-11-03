@@ -70,6 +70,7 @@ class SearchThreadsView(APIView):
         params["unanswered"] = data.get("unanswered", "false").lower() == "true"
         params["unresponded"] = data.get("unresponded", "false").lower() == "true"
         params["count_flagged"] = data.get("count_flagged", "false").lower() == "true"
+        params["include_deleted"] = data.get("include_deleted", "false").lower() == "true"
 
         # Group IDs extraction
         params["group_ids"] = get_group_ids_from_params(data)

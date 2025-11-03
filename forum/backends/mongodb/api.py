@@ -39,13 +39,21 @@ class MongoBackend(AbstractBackend):
         course_stats = user.get("course_stats", [])
         for course_stat in course_stats:
             if course_stat["course_id"] == course_id:
-                course_stat.update(
-                    {
-                        k: course_stat[k] + v
-                        for k, v in kwargs.items()
-                        if k in course_stat
-                    }
-                )
+                # Initialize deleted fields if they don't exist
+                if "deleted_count" not in course_stat:
+                    course_stat["deleted_count"] = 0
+                if "deleted_threads" not in course_stat:
+                    course_stat["deleted_threads"] = 0
+                if "deleted_responses" not in course_stat:
+                    course_stat["deleted_responses"] = 0
+                if "deleted_replies" not in course_stat:
+                    course_stat["deleted_replies"] = 0
+
+                # Update all fields from kwargs (existing or new)
+                for k, v in kwargs.items():
+                    current_value = course_stat.get(k, 0)
+                    course_stat[k] = current_value + v
+
                 Users().update(
                     user_id,
                     course_stats=course_stats,
@@ -555,6 +563,7 @@ class MongoBackend(AbstractBackend):
         raw_query: bool = False,
         commentable_ids: Optional[list[str]] = None,
         is_moderator: bool = False,
+        include_deleted: bool = False,
     ) -> dict[str, Any]:
         """
         Handles complex thread queries based on various filters and returns paginated results.
@@ -597,6 +606,16 @@ class MongoBackend(AbstractBackend):
             "_id": {"$in": comment_thread_obj_ids},
             "context": context,
         }
+
+        # Soft delete filtering
+        # include_deleted can be: False (active only), True (deleted only), or None (all)
+        if include_deleted is False:
+            # Show only active threads (exclude deleted)
+            base_query["is_deleted"] = {"$ne": True}
+        elif include_deleted is True:
+            # Show only deleted threads
+            base_query["is_deleted"] = True
+        # If include_deleted is None, don't add any filter (show all)
 
         # Group filtering
         if group_ids:
@@ -975,6 +994,15 @@ class MongoBackend(AbstractBackend):
     ) -> dict[str, Any]:
         """get subscribed or all threads of a specific course for a specific user."""
         count_flagged = bool(params.get("count_flagged", False))
+
+        # Handle is_deleted parameter for soft delete filtering
+        # is_deleted=False: show only active (explicit from learner tab)
+        # is_deleted=True: show only deleted (explicit from learner tab)
+        # is_deleted=None/missing: DEFAULT to active only (main posts view)
+        is_deleted_param = params.get("is_deleted")
+        # Default to False (active only) if not specified
+        include_deleted = is_deleted_param if is_deleted_param is not None else False
+
         threads = cls.handle_threads_query(
             thread_ids,
             user_id,
@@ -992,6 +1020,7 @@ class MongoBackend(AbstractBackend):
             int(params.get("per_page", 100)),
             commentable_ids=params.get("commentable_ids", []),
             is_moderator=params.get("is_moderator", False),
+            include_deleted=include_deleted,
         )
         context: dict[str, Any] = {
             "count_flagged": count_flagged,
@@ -1353,6 +1382,15 @@ class MongoBackend(AbstractBackend):
         course_stats = user.get("course_stats", [])
         for stat in course_stats:
             if stat["course_id"] == course_id:
+                # Ensure deleted fields exist
+                if "deleted_threads" not in stat:
+                    stat["deleted_threads"] = 0
+                if "deleted_responses" not in stat:
+                    stat["deleted_responses"] = 0
+                if "deleted_replies" not in stat:
+                    stat["deleted_replies"] = 0
+                if "deleted_count" not in stat:
+                    stat["deleted_count"] = 0
                 return stat
 
         course_stat = {
@@ -1362,6 +1400,10 @@ class MongoBackend(AbstractBackend):
             "threads": 0,
             "responses": 0,
             "replies": 0,
+            "deleted_threads": 0,
+            "deleted_responses": 0,
+            "deleted_replies": 0,
+            "deleted_count": 0,
             "course_id": course_id,
             "last_activity_at": "",
         }
@@ -1389,6 +1431,7 @@ class MongoBackend(AbstractBackend):
         user = Users().get(author_id)
         if not user:
             raise ObjectDoesNotExist
+        # Pipeline for ALL content (including deleted) - threads/responses/replies represent total
         pipeline = [
             {
                 "$match": {
@@ -1400,17 +1443,24 @@ class MongoBackend(AbstractBackend):
             },
             {
                 "$addFields": {
-                    "is_reply": {"$ne": [{"$ifNull": ["$parent_id", None]}, None]}
+                    "is_reply": {"$ne": [{"$ifNull": ["$parent_id", None]}, None]},
+                    "is_deleted": {"$ifNull": ["$is_deleted", False]}
                 }
             },
             {
                 "$group": {
                     "_id": {"type": "$_type", "is_reply": "$is_reply"},
                     "count": {"$sum": 1},
+                    # Only count flags on non-deleted content
                     "active_flags": {
                         "$sum": {
                             "$cond": {
-                                "if": {"$gt": [{"$size": "$abuse_flaggers"}, 0]},
+                                "if": {
+                                    "$and": [
+                                        {"$eq": ["$is_deleted", False]},
+                                        {"$gt": [{"$size": "$abuse_flaggers"}, 0]}
+                                    ]
+                                },
                                 "then": 1,
                                 "else": 0,
                             }
@@ -1420,7 +1470,10 @@ class MongoBackend(AbstractBackend):
                         "$sum": {
                             "$cond": {
                                 "if": {
-                                    "$gt": [{"$size": "$historical_abuse_flaggers"}, 0]
+                                    "$and": [
+                                        {"$eq": ["$is_deleted", False]},
+                                        {"$gt": [{"$size": "$historical_abuse_flaggers"}, 0]}
+                                    ]
                                 },
                                 "then": 1,
                                 "else": 0,
@@ -1432,14 +1485,42 @@ class MongoBackend(AbstractBackend):
             },
         ]
 
+        # Pipeline for deleted content count by type
+        deleted_pipeline = [
+            {
+                "$match": {
+                    "course_id": course_id,
+                    "author_id": user["external_id"],
+                    "is_deleted": True
+                }
+            },
+            {
+                "$addFields": {
+                    "is_reply": {"$ne": [{"$ifNull": ["$parent_id", None]}, None]}
+                }
+            },
+            {
+                "$group": {
+                    "_id": {"type": "$_type", "is_reply": "$is_reply"},
+                    "count": {"$sum": 1}
+                }
+            }
+        ]
+
         data = list(Contents().aggregate(pipeline))
+        deleted_data = list(Contents().aggregate(deleted_pipeline))
+
         active_flags = 0
         inactive_flags = 0
         threads = 0
         responses = 0
         replies = 0
+        deleted_threads = 0
+        deleted_responses = 0
+        deleted_replies = 0
         updated_at = datetime.utcfromtimestamp(0)
 
+        # Count ALL content (including deleted) - these represent total counts
         for counts in data:
             _type, is_reply = counts["_id"]["type"], counts["_id"]["is_reply"]
             last_update_at = counts.get("latest_update_at", datetime(1970, 1, 1))
@@ -1452,15 +1533,32 @@ class MongoBackend(AbstractBackend):
             last_update_at = make_aware(last_update_at)
             updated_at = make_aware(updated_at)
             updated_at = max(last_update_at, updated_at)
+            # Flags are already counted only on non-deleted content in the pipeline
             active_flags += counts["active_flags"]
             inactive_flags += counts["inactive_flags"]
 
+        # Count deleted content by type (subset of total)
+        for counts in deleted_data:
+            _type, is_reply = counts["_id"]["type"], counts["_id"]["is_reply"]
+            if _type == "Comment" and is_reply:
+                deleted_replies = counts["count"]
+            elif _type == "Comment" and not is_reply:
+                deleted_responses = counts["count"]
+            else:
+                deleted_threads = counts["count"]
+
         stats = cls.find_or_create_user_stats(user["external_id"], course_id)
+        # Store total counts (active + deleted)
         stats["replies"] = replies
         stats["responses"] = responses
         stats["threads"] = threads
         stats["active_flags"] = active_flags
         stats["inactive_flags"] = inactive_flags
+        # Store deleted counts separately
+        stats["deleted_threads"] = deleted_threads
+        stats["deleted_responses"] = deleted_responses
+        stats["deleted_replies"] = deleted_replies
+        stats["deleted_count"] = deleted_threads + deleted_responses + deleted_replies
         stats["last_activity_at"] = updated_at
         cls.update_user_stats_for_course(user["external_id"], stats)
 
@@ -1535,6 +1633,16 @@ class MongoBackend(AbstractBackend):
         Comment().delete(comment_id)
 
     @staticmethod
+    def soft_delete_comment(comment_id: str, user_id: str) -> int:
+        """Soft delete comment."""
+        return Comment().soft_delete(comment_id, user_id)
+
+    @staticmethod
+    def restore_comment(comment_id: str) -> int:
+        """Restore soft deleted comment."""
+        return Comment().restore(comment_id)
+
+    @staticmethod
     def get_thread_id_from_comment(comment_id: str) -> dict[str, Any] | None:
         """Return thread_id from comment_id."""
         parent_comment = Comment().get(comment_id)
@@ -1566,6 +1674,41 @@ class MongoBackend(AbstractBackend):
     def delete_thread(thread_id: str) -> int:
         """Delete thread."""
         return CommentThread().delete(thread_id)
+
+    @staticmethod
+    def soft_delete_thread(thread_id: str, user_id: str) -> int:
+        """Soft delete thread."""
+        return CommentThread().soft_delete(thread_id, user_id)
+
+    @staticmethod
+    def restore_thread(thread_id: str) -> int:
+        """Restore soft deleted thread."""
+        return CommentThread().restore(thread_id)
+
+    @staticmethod
+    def bulk_soft_delete_threads(thread_ids: list[str], user_id: str) -> int:
+        """Bulk soft delete threads."""
+        return CommentThread().bulk_soft_delete(thread_ids, user_id)
+
+    @staticmethod
+    def bulk_restore_threads(thread_ids: list[str]) -> int:
+        """Bulk restore soft deleted threads."""
+        return CommentThread().bulk_restore(thread_ids)
+
+    @staticmethod
+    def get_deleted_list(
+        resp_skip: int = 0,
+        resp_limit: Optional[int] = None,
+        sort: Optional[str] = None,
+        **kwargs: Any
+    ):
+        """Get list of soft deleted threads."""
+        return CommentThread().get_deleted_list(
+            resp_skip=resp_skip,
+            resp_limit=resp_limit,
+            sort=sort,
+            **kwargs
+        )
 
     @staticmethod
     def create_thread(data: dict[str, Any]) -> str:
@@ -1678,6 +1821,11 @@ class MongoBackend(AbstractBackend):
                 "course_stats.last_activity_at": -1,
                 "username": -1,
             }
+        elif sort_by == "deleted":
+            return {
+                "course_stats.deleted_count": -1,
+                "username": -1,
+            }
         else:
             return {
                 "course_stats.threads": -1,
@@ -1696,6 +1844,15 @@ class MongoBackend(AbstractBackend):
             {"$project": {"username": 1, "course_stats": 1}},
             {"$unwind": "$course_stats"},
             {"$match": {"course_stats.course_id": course_id}},
+            # Ensure deleted count fields exist with default value of 0 (backwards compatibility)
+            {
+                "$addFields": {
+                    "course_stats.deleted_count": {"$ifNull": ["$course_stats.deleted_count", 0]},
+                    "course_stats.deleted_threads": {"$ifNull": ["$course_stats.deleted_threads", 0]},
+                    "course_stats.deleted_responses": {"$ifNull": ["$course_stats.deleted_responses", 0]},
+                    "course_stats.deleted_replies": {"$ifNull": ["$course_stats.deleted_replies", 0]},
+                }
+            },
             {"$sort": sort_criterion},
             {
                 "$facet": {

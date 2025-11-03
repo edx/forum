@@ -246,6 +246,107 @@ def delete_comment(comment_id: str, course_id: Optional[str] = None) -> dict[str
     return data
 
 
+def soft_delete_comment(
+    comment_id: str, user_id: str, course_id: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Soft delete the comment for the given comment_id.
+
+    Parameters:
+        comment_id: The ID of the comment to be soft deleted.
+        user_id: The ID of the user performing the soft delete.
+        course_id: The course ID for backend selection.
+
+    Response:
+        The details of the comment that is soft deleted.
+    """
+    backend = get_backend(course_id)()
+    try:
+        comment = backend.validate_object("Comment", comment_id)
+    except ObjectDoesNotExist as exc:
+        log.error("Forumv2RequestError for soft delete comment request.")
+        raise ForumV2RequestError(
+            f"Comment does not exist with Id: {comment_id}"
+        ) from exc
+
+    # Check if already soft deleted (treat NULL/missing as False for legacy data)
+    if comment.get("is_deleted", False):
+        raise ForumV2RequestError(f"Comment {comment_id} is already deleted")
+
+    result = backend.soft_delete_comment(comment_id, user_id)
+    if result == 0:
+        raise ForumV2RequestError(f"Failed to soft delete comment {comment_id}")
+
+    # Update user stats: increment deleted counts (total replies/responses stay the same)
+    author_id = comment.get("author_id")
+    comment_course_id = comment.get("course_id")
+    parent_id = comment.get("parent_id")
+    
+    if author_id and comment_course_id:
+        if parent_id:  # It's a reply
+            backend.update_stats_for_course(author_id, comment_course_id, deleted_replies=1, deleted_count=1)
+        else:  # It's a response
+            backend.update_stats_for_course(author_id, comment_course_id, deleted_responses=1, deleted_count=1)
+
+    # Get updated comment data
+    updated_comment = backend.validate_object("Comment", comment_id)
+    return prepare_comment_api_response(
+        updated_comment,
+        backend,
+        exclude_fields=["endorsement", "sk"],
+    )
+
+
+def restore_comment(
+    comment_id: str, course_id: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Restore a soft deleted comment.
+
+    Parameters:
+        comment_id: The ID of the comment to be restored.
+        course_id: The course ID for backend selection.
+
+    Response:
+        The details of the comment that is restored.
+    """
+    backend = get_backend(course_id)()
+    try:
+        comment = backend.validate_object("Comment", comment_id)
+    except ObjectDoesNotExist as exc:
+        log.error("Forumv2RequestError for restore comment request.")
+        raise ForumV2RequestError(
+            f"Comment does not exist with Id: {comment_id}"
+        ) from exc
+
+    # Check if comment is actually deleted (treat NULL/missing as False for legacy data)
+    if not comment.get("is_deleted", False):
+        raise ForumV2RequestError(f"Comment {comment_id} is not deleted")
+
+    result = backend.restore_comment(comment_id)
+    if result == 0:
+        raise ForumV2RequestError(f"Failed to restore comment {comment_id}")
+
+    # Update user stats: decrement deleted counts (total replies/responses stay the same)
+    author_id = comment.get("author_id")
+    comment_course_id = comment.get("course_id")
+    parent_id = comment.get("parent_id")
+    
+    if author_id and comment_course_id:
+        if parent_id:  # It's a reply
+            backend.update_stats_for_course(author_id, comment_course_id, deleted_replies=-1, deleted_count=-1)
+        else:  # It's a response
+            backend.update_stats_for_course(author_id, comment_course_id, deleted_responses=-1, deleted_count=-1)
+
+    # Get updated comment data
+    updated_comment = backend.validate_object("Comment", comment_id)
+    return prepare_comment_api_response(
+        updated_comment,
+        backend,
+        exclude_fields=["endorsement", "sk"],
+    )
+
+
 def create_parent_comment(
     thread_id: str,
     body: str,
@@ -326,6 +427,7 @@ def get_user_comments(
     flagged: Optional[bool] = False,
     page: int = 1,
     per_page: int = 10,
+    is_deleted: Optional[bool] = None,
 ) -> dict[str, Any]:
     """
     Get all comments made by a user in a specific course.
@@ -336,6 +438,7 @@ def get_user_comments(
         flagged: Filter for flagged comments
         page: Page number for pagination
         per_page: Number of items per page
+        is_deleted: Filter for deleted (True) or active (False) comments, None for all
 
     Returns:
         A dictionary containing paginated comment results
@@ -351,6 +454,77 @@ def get_user_comments(
 
     if flagged:
         query_params["abuse_flaggers"] = {"$ne": [], "$exists": True}
+    
+    # Handle is_deleted filtering
+    if is_deleted is not None:
+        if is_deleted:
+            # Show only deleted comments
+            query_params["is_deleted"] = True
+        else:
+            # Show only active comments (exclude deleted)
+            query_params["is_deleted"] = {"$ne": True}
+
+    # Get total count
+    comment_count = backend.get_comments_count(**query_params)
+
+    # Calculate pagination
+    num_pages = max(1, math.ceil(comment_count / per_page))
+    skip = (page - 1) * per_page
+
+    # Get paginated comments
+    query_params["resp_skip"] = skip
+    query_params["resp_limit"] = per_page
+    query_params["sort"] = -1  # Sort by newest first
+
+    comments = backend.get_comments(**query_params)
+
+    return {
+        "collection": comments,
+        "comment_count": comment_count,
+        "num_pages": num_pages,
+        "page": page,
+    }
+
+
+def get_course_comments(
+    course_id: str,
+    is_deleted: Optional[bool] = None,
+    flagged: Optional[bool] = False,
+    page: int = 1,
+    per_page: int = 10,
+) -> dict[str, Any]:
+    """
+    Get all comments/responses in a specific course with optional filtering.
+
+    Args:
+        course_id: The ID of the course
+        is_deleted: Filter for deleted (True) or active (False) comments, None for all
+        flagged: Filter for flagged comments
+        page: Page number for pagination
+        per_page: Number of items per page
+
+    Returns:
+        A dictionary containing paginated comment results
+    """
+
+    backend = get_backend(course_id)()
+
+    # Build query parameters
+    query_params: dict[str, Any] = {
+        "course_id": course_id,
+    }
+
+    if flagged:
+        query_params["abuse_flaggers"] = {"$ne": [], "$exists": True}
+    
+    # Handle is_deleted filtering
+    if is_deleted is not None:
+        if is_deleted:
+            # Show only deleted comments
+            query_params["is_deleted"] = True
+        else:
+            # Show only active comments (exclude deleted)
+            query_params["is_deleted"] = {"$ne": True}
 
     # Get total count
     comment_count = backend.get_comments_count(**query_params)

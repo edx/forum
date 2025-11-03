@@ -62,6 +62,9 @@ class Comment(BaseContents):
             "created_at": doc.get("created_at"),
             "updated_at": doc.get("updated_at"),
             "title": doc.get("title"),
+            "is_deleted": doc.get("is_deleted", False),
+            "deleted_at": doc.get("deleted_at"),
+            "deleted_by": doc.get("deleted_by"),
         }
 
     def insert(
@@ -119,6 +122,9 @@ class Comment(BaseContents):
             "author_username": author_username or self.get_author_username(author_id),
             "created_at": date,
             "updated_at": date,
+            "is_deleted": False,
+            "deleted_at": None,
+            "deleted_by": None,
         }
         if parent_id:
             comment_data["parent_id"] = ObjectId(parent_id)
@@ -250,7 +256,7 @@ class Comment(BaseContents):
 
     def delete(self, _id: str) -> int:
         """
-        Deletes a comment from the database based on the id.
+        Soft deletes a comment from the database based on the id.
 
         Args:
             _id: The ID of the comment.
@@ -265,13 +271,14 @@ class Comment(BaseContents):
         parent_comment_id = comment.get("parent_id")
         child_comments_deleted_count = 0
         if not parent_comment_id:
-            child_comments_deleted_count = self.delete_child_comments(_id)
+            child_comments_deleted_count = self.soft_delete_child_comments(_id)
 
-        result = self._collection.delete_one({"_id": ObjectId(_id)})
+        # Use soft delete instead of hard delete
+        result = self.soft_delete(_id)
         if parent_comment_id:
             self.update_child_count_in_parent_comment(parent_comment_id, -1)
 
-        no_of_comments_delete = result.deleted_count + child_comments_deleted_count
+        no_of_comments_delete = result + child_comments_deleted_count
         comment_thread_id = comment["comment_thread_id"]
 
         self.update_comment_count_in_comment_thread(
@@ -314,6 +321,31 @@ class Comment(BaseContents):
             )
 
         return child_comments_deleted.deleted_count
+
+    def soft_delete_child_comments(self, _id: str) -> int:
+        """
+        Soft delete child comments from the database based on the id.
+
+        Args:
+            _id: The ID of the parent comment whose child comments will be soft deleted.
+
+        Returns:
+            The number of child comments soft deleted.
+        """
+        child_comments_to_delete = self.find({"parent_id": ObjectId(_id)})
+        child_comment_ids_to_delete = [
+            str(child_comment.get("_id")) for child_comment in child_comments_to_delete
+        ]
+        
+        deleted_count = 0
+        for child_comment_id in child_comment_ids_to_delete:
+            if self.soft_delete(child_comment_id):
+                deleted_count += 1
+                get_handler_by_name("comment_deleted").send(
+                    sender=self.__class__, comment_id=child_comment_id
+                )
+
+        return deleted_count
 
     def update_child_count_in_parent_comment(self, parent_id: str, count: int) -> None:
         """
@@ -363,3 +395,53 @@ class Comment(BaseContents):
         """Updates sk field."""
         sk = self.get_sk(_id, parent_id)
         self.update(_id, sk=sk)
+
+    def soft_delete(self, comment_id: str, user_id: str) -> int:
+        """Soft delete a comment"""
+        result = self._collection.update_one(
+            {"_id": ObjectId(comment_id), "is_deleted": {"$ne": True}},
+            {
+                "$set": {
+                    "is_deleted": True,
+                    "deleted_at": datetime.now(),
+                    "deleted_by": user_id,
+                }
+            },
+        )
+        
+        # Update Elasticsearch index
+        if result.modified_count > 0:
+            from forum.search.es import ElasticsearchDocumentBackend
+            es_backend = ElasticsearchDocumentBackend()
+            es_backend.update_document(
+                index_name=self.index_name,
+                doc_id=comment_id,
+                update_data={"is_deleted": True}
+            )
+        
+        return result.modified_count
+
+    def restore(self, comment_id: str) -> int:
+        """Restore a soft deleted comment"""
+        result = self._collection.update_one(
+            {"_id": ObjectId(comment_id), "is_deleted": True},
+            {
+                "$unset": {
+                    "is_deleted": "",
+                    "deleted_at": "",
+                    "deleted_by": "",
+                }
+            },
+        )
+        
+        # Update Elasticsearch index
+        if result.modified_count > 0:
+            from forum.search.es import ElasticsearchDocumentBackend
+            es_backend = ElasticsearchDocumentBackend()
+            es_backend.update_document(
+                index_name=self.index_name,
+                doc_id=comment_id,
+                update_data={"is_deleted": False}
+            )
+        
+        return result.modified_count

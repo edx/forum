@@ -21,7 +21,7 @@ def plugin_settings(settings: Any) -> None:
             settings, "FORUM_SEARCH_BACKEND", "forum.search.es.ElasticsearchBackend"
         )
         settings.FORUM_ELASTIC_SEARCH_CONFIG = getattr(
-            settings, "FORUM_ELASTIC_SEARCH_CONFIG", [{"host": "elasticsearch"}]
+            settings, "FORUM_ELASTIC_SEARCH_CONFIG", [{"host": "elasticsearch710"}]
         )
 
     # Unfortunately we can't copy settings from edx-platform because tutor patches have
@@ -30,7 +30,7 @@ def plugin_settings(settings: Any) -> None:
         settings, "FORUM_MONGODB_DATABASE", "cs_comments_service"
     )
     settings.FORUM_MONGODB_CLIENT_PARAMETERS = getattr(
-        settings, "FORUM_MONGODB_CLIENT_PARAMETERS", {"host": "mongodb"}
+        settings, "FORUM_MONGODB_CLIENT_PARAMETERS", {"host": "mongo"}
     )
 
     # Enable forum service

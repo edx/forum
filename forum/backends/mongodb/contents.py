@@ -109,16 +109,55 @@ class BaseContents(MongoBaseModel):
         Retrieves a list of all content documents in the database based on provided filters.
 
         Args:
-            kwargs: The filter arguments.
+            kwargs: The filter arguments. Special parameters:
+                - include_deleted: If True, include soft-deleted items. If False, exclude them.
+                                  If not provided, exclude soft-deleted items by default.
 
         Returns:
             A list of content documents.
         """
         resp_skip = kwargs.pop("resp_skip", 0)
         resp_limit = kwargs.pop("resp_limit", None)
+        include_deleted = kwargs.pop("include_deleted", False)
 
         if self.content_type:
             kwargs["_type"] = self.content_type
+
+        # Filter out soft-deleted items unless explicitly requested
+        if not include_deleted:
+            kwargs["is_deleted"] = {"$ne": True}
+
+        # Apply sorting first if provided
+        sort = kwargs.pop("sort", None)
+        query = self._collection.find(kwargs)
+        if sort:
+            query = query.sort("sk", sort)
+
+        # Apply pagination after sorting
+        query = query.skip(resp_skip)
+        if resp_limit is not None:
+            query = query.limit(resp_limit)
+
+        return query
+
+    def get_deleted_list(self, **kwargs: Any) -> Cursor[dict[str, Any]]:
+        """
+        Retrieves a list of soft-deleted content documents.
+
+        Args:
+            kwargs: The filter arguments.
+
+        Returns:
+            A list of soft-deleted content documents.
+        """
+        resp_skip = kwargs.pop("resp_skip", 0)
+        resp_limit = kwargs.pop("resp_limit", None)
+
+        if self.content_type:
+            kwargs["_type"] = self.content_type
+
+        # Only return soft-deleted items
+        kwargs["is_deleted"] = True
 
         # Apply sorting first if provided
         sort = kwargs.pop("sort", None)

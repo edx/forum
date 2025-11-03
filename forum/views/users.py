@@ -194,6 +194,8 @@ class UserActiveThreadsAPIView(APIView):
             params["count_flagged"] = str_to_bool(count_flagged)
         if group_id := params.get("group_id"):
             params["group_id"] = int(group_id)
+        if show_deleted := params.get("show_deleted"):
+            params["show_deleted"] = str_to_bool(show_deleted)
         try:
             serialized_data = get_user_active_threads(user_id, course_id, **params)
         except ForumV2RequestError as e:
