@@ -1044,6 +1044,7 @@ class MongoBackend(AbstractBackend):
             depth=data.get("depth", 0),
             comment_thread_id=data["comment_thread_id"],
             parent_id=data.get("parent_id"),
+            is_spam=data.get("is_spam", False),
         )
 
         if data.get("parent_id"):
@@ -1586,6 +1587,7 @@ class MongoBackend(AbstractBackend):
             abuse_flaggers=data.get("abuse_flaggers"),
             historical_abuse_flaggers=data.get("historical_abuse_flaggers"),
             group_id=data.get("group_id"),
+            is_spam=data.get("is_spam", False),
         )
         return new_thread_id
 
@@ -1763,3 +1765,46 @@ class MongoBackend(AbstractBackend):
             CommentThread().find({"author_username": username})
         )
         return contents
+
+    # AI Moderation Methods for MongoDB
+    @staticmethod
+    def flag_content_as_spam(content_type: str, content_id: str) -> int:
+        """
+        Flag content as spam by adding AI system to abuse flaggers and updating spam fields.
+
+        Args:
+            content_type: Type of content ('CommentThread' or 'Comment')
+            content_id: ID of the content to flag
+
+        Returns:
+            Number of documents modified
+        """
+        model = CommentThread() if content_type == "CommentThread" else Comment()
+
+        # Get current content to check existing flaggers
+        content = model.get(content_id)
+        if not content:
+            return 0
+
+        return model.update(content_id, is_spam=True)
+
+    @staticmethod
+    def unflag_content_as_spam(content_type: str, content_id: str) -> int:
+        """
+        Remove spam flag from content.
+
+        Args:
+            content_type: Type of content ('CommentThread' or 'Comment')
+            content_id: ID of the content to unflag
+
+        Returns:
+            Number of documents modified
+        """
+        model = CommentThread() if content_type == "CommentThread" else Comment()
+
+        # Get current content to update flaggers
+        content = model.get(content_id)
+        if not content:
+            return 0
+
+        return model.update(content_id, is_spam=False)
