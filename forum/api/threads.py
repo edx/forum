@@ -393,6 +393,7 @@ def get_user_threads(
         "user_id": user_id,
         "group_id": group_id,
         "group_ids": group_ids,
+        "context": kwargs.get("context"),
     }
     params = {k: v for k, v in params.items() if v is not None}
     backend.validate_params(params)

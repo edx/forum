@@ -946,6 +946,7 @@ class MongoBackend(AbstractBackend):
             "per_page",
             "request_id",
             "commentable_ids",
+            "context",
             "group_id",
             "group_ids",
         ]
@@ -990,6 +991,8 @@ class MongoBackend(AbstractBackend):
             params.get("sort_key", ""),
             int(params.get("page", 1)),
             int(params.get("per_page", 100)),
+            params.get("context", "course"),
+            raw_query=False,
             commentable_ids=params.get("commentable_ids", []),
             is_moderator=params.get("is_moderator", False),
         )
