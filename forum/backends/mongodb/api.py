@@ -1496,20 +1496,12 @@ class MongoBackend(AbstractBackend):
     def get_comment(comment_id: str) -> dict[str, Any] | None:
         """Get comment from id."""
         comment = Comment().get(comment_id)
-        # Return None if comment is soft deleted
-        if comment and comment.get('is_deleted'):
-            return None
         return comment
 
     @staticmethod
     def get_thread(thread_id: str) -> dict[str, Any] | None:
         """Get thread from id."""
         thread = CommentThread().get(thread_id)
-        if not thread:
-            return None
-        # Return None if thread is soft deleted
-        if thread.get('is_deleted'):
-            return None
         return thread
 
     @staticmethod
