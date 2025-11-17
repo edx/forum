@@ -596,6 +596,7 @@ class MongoBackend(AbstractBackend):
         base_query: dict[str, Any] = {
             "_id": {"$in": comment_thread_obj_ids},
             "context": context,
+            "is_deleted": {"$ne": True},  # Exclude soft deleted threads
         }
 
         # Group filtering
@@ -1495,6 +1496,9 @@ class MongoBackend(AbstractBackend):
     def get_comment(comment_id: str) -> dict[str, Any] | None:
         """Get comment from id."""
         comment = Comment().get(comment_id)
+        # Return None if comment is soft deleted
+        if comment and comment.get('is_deleted'):
+            return None
         return comment
 
     @staticmethod
@@ -1502,6 +1506,9 @@ class MongoBackend(AbstractBackend):
         """Get thread from id."""
         thread = CommentThread().get(thread_id)
         if not thread:
+            return None
+        # Return None if thread is soft deleted
+        if thread.get('is_deleted'):
             return None
         return thread
 
@@ -1567,6 +1574,42 @@ class MongoBackend(AbstractBackend):
     def delete_thread(thread_id: str) -> int:
         """Delete thread."""
         return CommentThread().delete(thread_id)
+
+    @staticmethod
+    def soft_delete_thread(thread_id: str, deleted_by: str = None) -> int:
+        """Soft delete thread by marking it as deleted."""
+        return CommentThread().update(
+            thread_id, 
+            is_deleted=True, 
+            deleted_at=datetime.now(), 
+            deleted_by=deleted_by
+        )
+
+    @staticmethod
+    def soft_delete_comments_of_a_thread(thread_id: str, deleted_by: str = None) -> None:
+        """Soft delete all comments of a thread by marking them as deleted."""
+        deleted_at = datetime.now()
+        for comment in Comment().get_list(
+            comment_thread_id=ObjectId(thread_id),
+            depth=0,
+            parent_id=None,
+        ):
+            Comment().update(
+                comment["_id"], 
+                is_deleted=True, 
+                deleted_at=deleted_at, 
+                deleted_by=deleted_by
+            )
+
+    @staticmethod
+    def soft_delete_comment(comment_id: str, deleted_by: str = None) -> None:
+        """Soft delete comment by marking it as deleted."""
+        Comment().update(
+            comment_id, 
+            is_deleted=True, 
+            deleted_at=datetime.now(), 
+            deleted_by=deleted_by
+        )
 
     @staticmethod
     def create_thread(data: dict[str, Any]) -> str:
@@ -1723,7 +1766,35 @@ class MongoBackend(AbstractBackend):
     @staticmethod
     def get_contents(**kwargs: Any) -> list[dict[str, Any]]:
         """Return contents."""
-        return list(Contents().get_list(**kwargs))
+        # Add soft delete filtering
+        kwargs['is_deleted'] = {'$ne': True}
+        contents = list(Contents().get_list(**kwargs))
+        
+        # Get all thread IDs mentioned in comments
+        comment_thread_ids = set()
+        for content in contents:
+            if content.get('_type') == 'Comment' and content.get('comment_thread_id'):
+                comment_thread_ids.add(content['comment_thread_id'])
+        
+        # Get all deleted thread IDs in one query
+        deleted_thread_ids = set()
+        if comment_thread_ids:
+            deleted_threads = CommentThread()._collection.find(
+                {"_id": {"$in": list(comment_thread_ids)}, "is_deleted": True},
+                {"_id": 1}
+            )
+            deleted_thread_ids = {thread['_id'] for thread in deleted_threads}
+        
+        # Filter out comments that belong to deleted threads
+        filtered_contents = []
+        for content in contents:
+            if content.get('_type') == 'Comment':
+                thread_id = content.get('comment_thread_id')
+                if thread_id and thread_id in deleted_thread_ids:
+                    continue  # Skip comment if its thread is deleted
+            filtered_contents.append(content)
+        
+        return filtered_contents
 
     @staticmethod
     def get_user_thread_filter(course_id: str) -> dict[str, Any]:
@@ -1731,6 +1802,7 @@ class MongoBackend(AbstractBackend):
         return {
             "_type": {"$in": [CommentThread.content_type]},
             "course_id": {"$in": [course_id]},
+            "is_deleted": {"$ne": True},  # Exclude soft deleted threads
         }
 
     @staticmethod

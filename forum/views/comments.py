@@ -142,7 +142,7 @@ class CommentsAPIView(APIView):
             request (Request): The incoming request.
             comment_id: The ID of the comment to be deleted.
         Body:
-            Empty.
+            deleted_by: Optional ID of the user performing the delete (defaults to authenticated user).
         Response:
             The details of the comment that is deleted.
         """

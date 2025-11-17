@@ -129,6 +129,25 @@ class Content(models.Model):
         default=False,
         help_text="Whether this content has been identified as spam by AI moderation",
     )
+    is_deleted: models.BooleanField[bool, bool] = models.BooleanField(
+        default=False,
+        help_text="Whether this content has been soft deleted",
+    )
+    deleted_at: models.DateTimeField[Optional[datetime], datetime] = (
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text="When this content was soft deleted",
+        )
+    )
+    deleted_by: models.ForeignKey[User, User] = models.ForeignKey(
+        User,
+        related_name="deleted_%(class)s",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        help_text="User who soft deleted this content",
+    )
     uservote = GenericRelation(
         "UserVote",
         object_id_field="content_object_id",
@@ -267,8 +286,8 @@ class CommentThread(Content):
 
     @property
     def comment_count(self) -> int:
-        """Return the number of comments in the thread."""
-        return Comment.objects.filter(comment_thread=self).count()
+        """Return the number of comments in the thread (excluding deleted)."""
+        return Comment.objects.filter(comment_thread=self, is_deleted=False).count()
 
     @classmethod
     def get(cls, thread_id: str) -> CommentThread:
@@ -323,6 +342,9 @@ class CommentThread(Content):
             "edit_history": edit_history,
             "group_id": self.group_id,
             "is_spam": self.is_spam,
+            "is_deleted": self.is_deleted,
+            "deleted_at": self.deleted_at,
+            "deleted_by": str(self.deleted_by.pk) if self.deleted_by else None,
         }
 
     def doc_to_hash(self) -> dict[str, Any]:
@@ -509,6 +531,9 @@ class Comment(Content):
             "created_at": self.created_at,
             "endorsement": endorsement if self.endorsement else None,
             "is_spam": self.is_spam,
+            "is_deleted": self.is_deleted,
+            "deleted_at": self.deleted_at,
+            "deleted_by": str(self.deleted_by.pk) if self.deleted_by else None,
         }
         if edit_history:
             data["edit_history"] = edit_history

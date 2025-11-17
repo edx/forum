@@ -159,12 +159,14 @@ def get_thread(
         raise ForumV2RequestError("Failed to prepare thread API response") from error
 
 
-def delete_thread(thread_id: str, course_id: Optional[str] = None) -> dict[str, Any]:
+def delete_thread(thread_id: str, course_id: Optional[str] = None, deleted_by: Optional[str] = None) -> dict[str, Any]:
     """
     Delete the thread for the given thread_id.
 
     Parameters:
         thread_id: The ID of the thread to be deleted.
+        course_id: The ID of the course (optional).
+        deleted_by: The ID of the user performing the delete (optional).
     Response:
         The details of the thread that is deleted.
     """
@@ -177,7 +179,9 @@ def delete_thread(thread_id: str, course_id: Optional[str] = None) -> dict[str, 
             f"Thread does not exist with Id: {thread_id}"
         ) from exc
 
-    backend.delete_comments_of_a_thread(thread_id)
+    # Soft delete comments and thread instead of hard delete
+    backend.soft_delete_comments_of_a_thread(thread_id, deleted_by)
+    # backend.delete_comments_of_a_thread(thread_id)
     thread = backend.validate_object("CommentThread", thread_id)
 
     try:
@@ -187,7 +191,9 @@ def delete_thread(thread_id: str, course_id: Optional[str] = None) -> dict[str, 
         raise ForumV2RequestError("Failed to prepare thread API response") from error
 
     backend.delete_subscriptions_of_a_thread(thread_id)
-    result = backend.delete_thread(thread_id)
+    # Soft delete thread instead of hard delete
+    result = backend.soft_delete_thread(thread_id, deleted_by)
+    # result = backend.delete_thread(thread_id)
     if result and not (thread["anonymous"] or thread["anonymous_to_peers"]):
         backend.update_stats_for_course(
             thread["author_id"], thread["course_id"], threads=-1

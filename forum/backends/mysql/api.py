@@ -653,7 +653,7 @@ class MySQLBackend(AbstractBackend):
                 raise ValueError("User does not exist") from exc
         # Base query
         base_query = CommentThread.objects.filter(
-            pk__in=mysql_comment_thread_ids, context=context
+            pk__in=mysql_comment_thread_ids, context=context, is_deleted=False  # Exclude soft deleted threads
         )
 
         # Group filtering
@@ -985,6 +985,15 @@ class MySQLBackend(AbstractBackend):
     def delete_comments_of_a_thread(thread_id: str) -> None:
         """Delete comments of a thread."""
         Comment.objects.filter(comment_thread__pk=thread_id, parent=None).delete()
+
+    @staticmethod
+    def soft_delete_comments_of_a_thread(thread_id: str, deleted_by: str = None) -> None:
+        """Soft delete comments of a thread by marking them as deleted."""
+        Comment.objects.filter(comment_thread__pk=thread_id, parent=None).update(
+            is_deleted=True,
+            deleted_at=timezone.now(),
+            deleted_by=deleted_by
+        )
 
     @classmethod
     def delete_subscriptions_of_a_thread(cls, thread_id: str) -> None:
@@ -1450,7 +1459,7 @@ class MySQLBackend(AbstractBackend):
     def get_comment(comment_id: str) -> dict[str, Any] | None:
         """Return comment from comment_id."""
         try:
-            comment = Comment.objects.get(pk=comment_id)
+            comment = Comment.objects.get(pk=comment_id, is_deleted=False)  # Exclude soft deleted comments
         except Comment.DoesNotExist:
             return None
         return comment.to_dict()
@@ -1529,6 +1538,15 @@ class MySQLBackend(AbstractBackend):
             cls.update_child_count_in_parent_comment(str(comment.parent.pk), -1)
 
         comment.delete()
+
+    @staticmethod
+    def soft_delete_comment(comment_id: str, deleted_by: str = None) -> None:
+        """Soft delete comment by marking it as deleted."""
+        comment = Comment.objects.get(pk=comment_id)
+        comment.is_deleted = True
+        comment.deleted_at = timezone.now()
+        comment.deleted_by = deleted_by
+        comment.save()
 
     @staticmethod
     def get_commentables_counts_based_on_type(course_id: str) -> dict[str, Any]:
@@ -1716,7 +1734,7 @@ class MySQLBackend(AbstractBackend):
     def get_thread(thread_id: str) -> dict[str, Any] | None:
         """Return thread from thread_id."""
         try:
-            thread = CommentThread.objects.get(pk=thread_id)
+            thread = CommentThread.objects.get(pk=thread_id, is_deleted=False)  # Exclude soft deleted threads
         except CommentThread.DoesNotExist:
             return None
         return thread.to_dict()
@@ -1769,6 +1787,19 @@ class MySQLBackend(AbstractBackend):
         except ObjectDoesNotExist:
             return 0
         thread.delete()
+        return 1
+
+    @staticmethod
+    def soft_delete_thread(thread_id: str, deleted_by: str = None) -> int:
+        """Soft delete thread by marking it as deleted."""
+        try:
+            thread = CommentThread.objects.get(pk=thread_id)
+        except ObjectDoesNotExist:
+            return 0
+        thread.is_deleted = True
+        thread.deleted_at = timezone.now()
+        thread.deleted_by = deleted_by
+        thread.save()
         return 1
 
     @staticmethod
@@ -1911,14 +1942,14 @@ class MySQLBackend(AbstractBackend):
     @staticmethod
     def get_user_thread_filter(course_id: str) -> dict[str, Any]:
         """Get user thread filter"""
-        return {"course_id": course_id}
+        return {"course_id": course_id, "is_deleted": False}  # Exclude soft deleted threads
 
     @staticmethod
     def get_filtered_threads(
         query: dict[str, Any], ids_only: bool = False
     ) -> list[dict[str, Any]]:
         """Return a list of threads that match the given filter."""
-        threads = CommentThread.objects.filter(**query)
+        threads = CommentThread.objects.filter(**query).filter(is_deleted=False)  # Exclude soft deleted threads
         if ids_only:
             return [{"_id": str(thread.pk)} for thread in threads]
         return [thread.to_dict() for thread in threads]
@@ -2158,8 +2189,11 @@ class MySQLBackend(AbstractBackend):
             key: value for key, value in kwargs.items() if hasattr(CommentThread, key)
         }
 
-        comments = Comment.objects.filter(**comment_filters)
-        threads = CommentThread.objects.filter(**thread_filters)
+        comments = Comment.objects.filter(**comment_filters).filter(
+            is_deleted=False,  # Exclude soft deleted comments
+            comment_thread__is_deleted=False  # Exclude comments on deleted threads
+        )
+        threads = CommentThread.objects.filter(**thread_filters).filter(is_deleted=False)  # Exclude soft deleted threads
 
         sort_key = kwargs.get("sort_key")
         if sort_key:
