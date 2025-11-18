@@ -992,7 +992,7 @@ class MongoBackend(AbstractBackend):
             int(params.get("page", 1)),
             int(params.get("per_page", 100)),
             params.get("context", "course"),
-            params.get("raw_query", False),
+            bool(params.get("raw_query", False)),
             commentable_ids=params.get("commentable_ids", []),
             is_moderator=params.get("is_moderator", False),
         )
