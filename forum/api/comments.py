@@ -220,12 +220,14 @@ def update_comment(
         raise error
 
 
-def delete_comment(comment_id: str, course_id: Optional[str] = None) -> dict[str, Any]:
+def delete_comment(comment_id: str, course_id: Optional[str] = None, deleted_by: Optional[str] = None) -> dict[str, Any]:
     """
     Delete a comment.
 
     Parameters:
         comment_id: The ID of the comment to be deleted.
+        course_id: The ID of the course (optional).
+        deleted_by: The ID of the user performing the delete (optional).
     Body:
         Empty.
     Response:
@@ -244,7 +246,9 @@ def delete_comment(comment_id: str, course_id: Optional[str] = None) -> dict[str
         backend,
         exclude_fields=["endorsement", "sk"],
     )
-    backend.delete_comment(comment_id)
+    # Soft delete comment instead of hard delete
+    backend.soft_delete_comment(comment_id, deleted_by)
+    # backend.delete_comment(comment_id)
     author_id = comment["author_id"]
     comment_course_id = comment["course_id"]
     parent_comment_id = data["parent_id"]
