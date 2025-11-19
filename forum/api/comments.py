@@ -392,3 +392,20 @@ def get_user_comments(
         "num_pages": num_pages,
         "page": page,
     }
+
+
+def get_deleted_comments_for_course(course_id: str, page: int = 1, per_page: int = 20, author_id: str = None) -> dict[str, Any]:
+    """
+    Get deleted comments for a specific course.
+    
+    Args:
+        course_id (str): The course identifier
+        page (int): Page number for pagination (default: 1)
+        per_page (int): Number of comments per page (default: 20)
+        author_id (str, optional): Filter by author ID
+        
+    Returns:
+        dict: Dictionary containing deleted comments and pagination info
+    """
+    backend = get_backend(course_id)()
+    return backend.get_deleted_comments_for_course(course_id, page, per_page, author_id)

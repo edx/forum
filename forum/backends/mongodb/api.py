@@ -555,6 +555,7 @@ class MongoBackend(AbstractBackend):
         raw_query: bool = False,
         commentable_ids: Optional[list[str]] = None,
         is_moderator: bool = False,
+        is_deleted: bool = False,
     ) -> dict[str, Any]:
         """
         Handles complex thread queries based on various filters and returns paginated results.
@@ -578,6 +579,7 @@ class MongoBackend(AbstractBackend):
             raw_query (bool): Whether to return raw query results without further processing.
             commentable_ids (Optional[list[str]]): List of commentable IDs to filter threads by topic id.
             is_moderator (bool): Whether the user is a discussion moderator.
+            is_deleted (bool): If True, include deleted content; if False (default), exclude deleted content.
 
         Returns:
             dict[str, Any]: A dictionary containing the paginated thread results and associated metadata.
@@ -596,8 +598,11 @@ class MongoBackend(AbstractBackend):
         base_query: dict[str, Any] = {
             "_id": {"$in": comment_thread_obj_ids},
             "context": context,
-            "is_deleted": {"$ne": True},  # Exclude soft deleted threads
         }
+        
+        # Include/exclude deleted content based on is_deleted parameter
+        if not is_deleted:
+            base_query["is_deleted"] = {"$ne": True}  # Exclude soft deleted threads
 
         # Group filtering
         if group_ids:
@@ -949,6 +954,7 @@ class MongoBackend(AbstractBackend):
             "commentable_ids",
             "group_id",
             "group_ids",
+            "is_deleted",
         ]
         if not user_id:
             valid_params.append("user_id")
@@ -1767,6 +1773,58 @@ class MongoBackend(AbstractBackend):
         for content in contents:
             if content.get('_type') == 'Comment' and content.get('comment_thread_id'):
                 comment_thread_ids.add(content['comment_thread_id'])
+
+    @staticmethod
+    def get_deleted_threads_for_course(course_id: str, page: int = 1, per_page: int = 20, author_id: str = None) -> dict[str, Any]:
+        """Get deleted threads for a course."""
+        query = {
+            'course_id': course_id,
+            'is_deleted': True,
+            '_type': 'CommentThread'
+        }
+        
+        if author_id:
+            query['author_id'] = author_id
+            
+        # Get total count
+        total_count = CommentThread().count_documents(query)
+        
+        # Get paginated results
+        skip = (page - 1) * per_page
+        threads = list(CommentThread().find(query).skip(skip).limit(per_page).sort([('deleted_at', -1)]))
+        
+        return {
+            'threads': threads,
+            'total_count': total_count,
+            'page': page,
+            'per_page': per_page
+        }
+    
+    @staticmethod
+    def get_deleted_comments_for_course(course_id: str, page: int = 1, per_page: int = 20, author_id: str = None) -> dict[str, Any]:
+        """Get deleted comments for a course."""
+        query = {
+            'course_id': course_id,
+            'is_deleted': True,
+            '_type': 'Comment'
+        }
+        
+        if author_id:
+            query['author_id'] = author_id
+            
+        # Get total count
+        total_count = Comment().count_documents(query)
+        
+        # Get paginated results
+        skip = (page - 1) * per_page
+        comments = list(Comment().find(query).skip(skip).limit(per_page).sort([('deleted_at', -1)]))
+        
+        return {
+            'comments': comments,
+            'total_count': total_count,
+            'page': page,
+            'per_page': per_page
+        }
         
         # Get all deleted thread IDs in one query
         deleted_thread_ids = set()
@@ -1794,7 +1852,6 @@ class MongoBackend(AbstractBackend):
         return {
             "_type": {"$in": [CommentThread.content_type]},
             "course_id": {"$in": [course_id]},
-            "is_deleted": {"$ne": True},  # Exclude soft deleted threads
         }
 
     @staticmethod

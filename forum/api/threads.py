@@ -399,6 +399,7 @@ def get_user_threads(
         "user_id": user_id,
         "group_id": group_id,
         "group_ids": group_ids,
+        "is_deleted": kwargs.get("is_deleted", False),
     }
     params = {k: v for k, v in params.items() if v is not None}
     backend.validate_params(params)
@@ -425,3 +426,20 @@ def get_course_id_by_thread(thread_id: str) -> str | None:
         or MySQLBackend.get_course_id_by_thread_id(thread_id)
         or None
     )
+
+
+def get_deleted_threads_for_course(course_id: str, page: int = 1, per_page: int = 20, author_id: str = None) -> dict[str, Any]:
+    """
+    Get deleted threads for a specific course.
+    
+    Args:
+        course_id (str): The course identifier
+        page (int): Page number for pagination (default: 1)
+        per_page (int): Number of threads per page (default: 20)
+        author_id (str, optional): Filter by author ID
+        
+    Returns:
+        dict: Dictionary containing deleted threads and pagination info
+    """
+    backend = get_backend(course_id)()
+    return backend.get_deleted_threads_for_course(course_id, page, per_page, author_id)

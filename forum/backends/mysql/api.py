@@ -2289,3 +2289,61 @@ class MySQLBackend(AbstractBackend):
             return cls.update_thread(content_id, **update_data)
         else:
             return cls.update_comment(content_id, **update_data)
+
+    @staticmethod
+    def get_deleted_threads_for_course(course_id: str, page: int = 1, per_page: int = 20, author_id: str = None) -> dict[str, Any]:
+        """Get deleted threads for a course."""
+        query = CommentThread.objects.filter(
+            course_id=course_id,
+            is_deleted=True
+        ).order_by('-deleted_at')
+        
+        if author_id:
+            query = query.filter(author__external_id=author_id)
+            
+        # Get total count
+        total_count = query.count()
+        
+        # Get paginated results
+        paginator = Paginator(query, per_page)
+        try:
+            page_obj = paginator.page(page)
+            threads = [thread.to_dict() for thread in page_obj.object_list]
+        except Exception:
+            threads = []
+        
+        return {
+            'threads': threads,
+            'total_count': total_count,
+            'page': page,
+            'per_page': per_page
+        }
+    
+    @staticmethod
+    def get_deleted_comments_for_course(course_id: str, page: int = 1, per_page: int = 20, author_id: str = None) -> dict[str, Any]:
+        """Get deleted comments for a course."""
+        query = Comment.objects.filter(
+            course_id=course_id,
+            is_deleted=True
+        ).order_by('-deleted_at')
+        
+        if author_id:
+            query = query.filter(author__external_id=author_id)
+            
+        # Get total count
+        total_count = query.count()
+        
+        # Get paginated results
+        paginator = Paginator(query, per_page)
+        try:
+            page_obj = paginator.page(page)
+            comments = [comment.to_dict() for comment in page_obj.object_list]
+        except Exception:
+            comments = []
+        
+        return {
+            'comments': comments,
+            'total_count': total_count,
+            'page': page,
+            'per_page': per_page
+        }
