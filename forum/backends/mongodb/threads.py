@@ -81,6 +81,9 @@ class CommentThread(BaseContents):
             "author_id": doc.get("author_id"),
             "group_id": doc.get("group_id"),
             "thread_id": str(doc.get("_id")),
+            "is_deleted": doc.get("is_deleted", False),
+            "deleted_at": doc.get("deleted_at"),
+            "deleted_by": doc.get("deleted_by"),
         }
 
     def insert(
@@ -208,6 +211,9 @@ class CommentThread(BaseContents):
         group_id: Optional[int] = None,
         skip_timestamp_update: bool = False,
         is_spam: Optional[bool] = None,
+        is_deleted: Optional[bool] = None,
+        deleted_at: Optional[datetime] = None,
+        deleted_by: Optional[str] = None,
     ) -> int:
         """
         Updates a thread document in the database.
@@ -262,6 +268,9 @@ class CommentThread(BaseContents):
             ("closed_by_id", closed_by_id),
             ("group_id", group_id),
             ("is_spam", is_spam),
+            ("is_deleted", is_deleted),
+            ("deleted_at", deleted_at),
+            ("deleted_by", deleted_by),
         ]
         update_data: dict[str, Any] = {
             field: value for field, value in fields if value is not None

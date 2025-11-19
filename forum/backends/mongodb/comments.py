@@ -62,6 +62,9 @@ class Comment(BaseContents):
             "created_at": doc.get("created_at"),
             "updated_at": doc.get("updated_at"),
             "title": doc.get("title"),
+            "is_deleted": doc.get("is_deleted", False),
+            "deleted_at": doc.get("deleted_at"),
+            "deleted_by": doc.get("deleted_by"),
         }
 
     def insert(
@@ -166,6 +169,9 @@ class Comment(BaseContents):
         endorsement_user_id: Optional[str] = None,
         sk: Optional[str] = None,
         is_spam: Optional[bool] = None,
+        is_deleted: Optional[bool] = None,
+        deleted_at: Optional[datetime] = None,
+        deleted_by: Optional[str] = None,
     ) -> int:
         """
         Updates a comment document in the database.
@@ -210,6 +216,9 @@ class Comment(BaseContents):
             ("closed", closed),
             ("sk", sk),
             ("is_spam", is_spam),
+            ("is_deleted", is_deleted),
+            ("deleted_at", deleted_at),
+            ("deleted_by", deleted_by),
         ]
         update_data: dict[str, Any] = {
             field: value for field, value in fields if value is not None
