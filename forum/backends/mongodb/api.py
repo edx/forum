@@ -1776,7 +1776,14 @@ class MongoBackend(AbstractBackend):
 
     @staticmethod
     def get_deleted_threads_for_course(course_id: str, page: int = 1, per_page: int = 20, author_id: str = None) -> dict[str, Any]:
-        """Get deleted threads for a course."""
+        """Get deleted threads for a course.
+        
+        Args:
+            course_id: Course identifier
+            page: Page number for pagination
+            per_page: Number of items per page
+            author_id: Author username (despite the parameter name, this is actually the username)
+        """
         query = {
             'course_id': course_id,
             'is_deleted': True,
@@ -1784,7 +1791,7 @@ class MongoBackend(AbstractBackend):
         }
         
         if author_id:
-            query['author_id'] = author_id
+            query['author_username'] = author_id
             
         # Get total count
         total_count = CommentThread().count_documents(query)
@@ -1802,7 +1809,14 @@ class MongoBackend(AbstractBackend):
     
     @staticmethod
     def get_deleted_comments_for_course(course_id: str, page: int = 1, per_page: int = 20, author_id: str = None) -> dict[str, Any]:
-        """Get deleted comments for a course."""
+        """Get deleted comments for a course.
+        
+        Args:
+            course_id: Course identifier
+            page: Page number for pagination
+            per_page: Number of items per page
+            author_id: Author username (despite the parameter name, this is actually the username)
+        """
         query = {
             'course_id': course_id,
             'is_deleted': True,
@@ -1810,7 +1824,7 @@ class MongoBackend(AbstractBackend):
         }
         
         if author_id:
-            query['author_id'] = author_id
+            query['author_username'] = author_id
             
         # Get total count
         total_count = Comment().count_documents(query)
@@ -1825,26 +1839,6 @@ class MongoBackend(AbstractBackend):
             'page': page,
             'per_page': per_page
         }
-        
-        # Get all deleted thread IDs in one query
-        deleted_thread_ids = set()
-        if comment_thread_ids:
-            deleted_threads = CommentThread()._collection.find(
-                {"_id": {"$in": list(comment_thread_ids)}, "is_deleted": True},
-                {"_id": 1}
-            )
-            deleted_thread_ids = {thread['_id'] for thread in deleted_threads}
-        
-        # Filter out comments that belong to deleted threads
-        filtered_contents = []
-        for content in contents:
-            if content.get('_type') == 'Comment':
-                thread_id = content.get('comment_thread_id')
-                if thread_id and thread_id in deleted_thread_ids:
-                    continue  # Skip comment if its thread is deleted
-            filtered_contents.append(content)
-        
-        return filtered_contents
 
     @staticmethod
     def get_user_thread_filter(course_id: str) -> dict[str, Any]:
