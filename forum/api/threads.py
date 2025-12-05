@@ -443,3 +443,57 @@ def get_deleted_threads_for_course(course_id: str, page: int = 1, per_page: int 
     """
     backend = get_backend(course_id)()
     return backend.get_deleted_threads_for_course(course_id, page, per_page, author_id)
+
+
+def restore_thread(thread_id: str, course_id: Optional[str] = None, restored_by: Optional[str] = None) -> bool:
+    """
+    Restore a soft-deleted thread.
+    
+    Args:
+        thread_id (str): The ID of the thread to restore
+        course_id (str, optional): The course ID for backend selection
+        restored_by (str, optional): The ID of the user performing the restoration
+        
+    Returns:
+        bool: True if thread was restored, False if not found
+    """
+    backend = get_backend(course_id)()
+    return backend.restore_thread(thread_id, restored_by=restored_by)
+
+
+def get_user_deleted_threads_count(user_id: str, course_ids: list[str], course_id: Optional[str] = None) -> int:
+    """
+    Get count of deleted threads for a user across courses.
+    
+    Args:
+        user_id (str): The ID of the user
+        course_ids (list): List of course IDs to search in
+        course_id (str, optional): Course ID for backend selection (uses first from list if not provided)
+        
+    Returns:
+        int: Count of deleted threads
+    """
+    backend = get_backend(course_id or course_ids[0])()
+    return backend.get_user_deleted_threads_count(user_id, course_ids)
+
+
+def restore_user_deleted_threads(
+    user_id: str, 
+    course_ids: list[str], 
+    course_id: Optional[str] = None,
+    restored_by: Optional[str] = None
+) -> int:
+    """
+    Restore all deleted threads for a user across courses.
+    
+    Args:
+        user_id (str): The ID of the user whose threads to restore
+        course_ids (list): List of course IDs to restore threads in
+        course_id (str, optional): Course ID for backend selection (uses first from list if not provided)
+        restored_by (str, optional): The ID of the user performing the restoration
+        
+    Returns:
+        int: Number of threads restored
+    """
+    backend = get_backend(course_id or course_ids[0])()
+    return backend.restore_user_deleted_threads(user_id, course_ids, restored_by=restored_by)

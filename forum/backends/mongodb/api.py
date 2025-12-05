@@ -1541,6 +1541,11 @@ class MongoBackend(AbstractBackend):
         Comment().delete(comment_id)
 
     @staticmethod
+    def soft_delete_comment(comment_id: str, deleted_by: str = None) -> None:
+        """Soft delete comment by marking it as deleted."""
+        Comment().delete(comment_id, mode='soft', deleted_by=deleted_by)
+
+    @staticmethod
     def get_thread_id_from_comment(comment_id: str) -> dict[str, Any] | None:
         """Return thread_id from comment_id."""
         parent_comment = Comment().get(comment_id)
@@ -1599,15 +1604,35 @@ class MongoBackend(AbstractBackend):
                 deleted_by=deleted_by
             )
 
+
+
     @staticmethod
-    def soft_delete_comment(comment_id: str, deleted_by: str = None) -> None:
-        """Soft delete comment by marking it as deleted."""
-        Comment().update(
-            comment_id, 
-            is_deleted=True, 
-            deleted_at=datetime.now(), 
-            deleted_by=deleted_by
-        )
+    def restore_comment(comment_id: str, restored_by: Optional[str] = None) -> bool:
+        """Restore a soft-deleted comment."""
+        return Comment().restore_comment(comment_id, restored_by=restored_by)
+
+    @staticmethod
+    def restore_thread(thread_id: str, restored_by: Optional[str] = None) -> bool:
+        """Restore a soft-deleted thread."""
+        return CommentThread().restore_thread(thread_id, restored_by=restored_by)
+
+    @staticmethod
+    def restore_user_deleted_comments(
+        user_id: str, 
+        course_ids: list[str], 
+        restored_by: Optional[str] = None
+    ) -> int:
+        """Restore all deleted comments for a user in given courses."""
+        return Comment().restore_user_deleted_comments(user_id, course_ids, restored_by=restored_by)
+
+    @staticmethod
+    def restore_user_deleted_threads(
+        user_id: str, 
+        course_ids: list[str], 
+        restored_by: Optional[str] = None
+    ) -> int:
+        """Restore all deleted threads for a user in given courses."""
+        return CommentThread().restore_user_deleted_threads(user_id, course_ids, restored_by=restored_by)
 
     @staticmethod
     def create_thread(data: dict[str, Any]) -> str:

@@ -1549,6 +1549,68 @@ class MySQLBackend(AbstractBackend):
         comment.save()
 
     @staticmethod
+    def restore_comment(comment_id: str, restored_by: Optional[str] = None) -> bool:
+        """Restore a soft-deleted comment."""
+        try:
+            comment = Comment.objects.get(pk=comment_id, is_deleted=True)
+            comment.is_deleted = False
+            comment.deleted_at = None
+            comment.deleted_by = None
+            comment.save()
+            return True
+        except ObjectDoesNotExist:
+            return False
+
+    @staticmethod
+    def restore_thread(thread_id: str, restored_by: Optional[str] = None) -> bool:
+        """Restore a soft-deleted thread."""
+        try:
+            thread = CommentThread.objects.get(pk=thread_id, is_deleted=True)
+            thread.is_deleted = False
+            thread.deleted_at = None
+            thread.deleted_by = None
+            thread.save()
+            return True
+        except ObjectDoesNotExist:
+            return False
+
+    @staticmethod
+    def restore_user_deleted_comments(
+        user_id: str, 
+        course_ids: list[str], 
+        restored_by: Optional[str] = None
+    ) -> int:
+        """Restore all deleted comments for a user in given courses."""
+        count = Comment.objects.filter(
+            author_id=user_id,
+            course_id__in=course_ids,
+            is_deleted=True
+        ).update(
+            is_deleted=False,
+            deleted_at=None,
+            deleted_by=None
+        )
+        return count
+
+    @staticmethod
+    def restore_user_deleted_threads(
+        user_id: str, 
+        course_ids: list[str], 
+        restored_by: Optional[str] = None
+    ) -> int:
+        """Restore all deleted threads for a user in given courses."""
+        count = CommentThread.objects.filter(
+            author_id=user_id,
+            course_id__in=course_ids,
+            is_deleted=True
+        ).update(
+            is_deleted=False,
+            deleted_at=None,
+            deleted_by=None
+        )
+        return count
+
+    @staticmethod
     def get_commentables_counts_based_on_type(course_id: str) -> dict[str, Any]:
         """Return commentables counts in a course based on thread's type."""
         result = (

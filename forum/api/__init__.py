@@ -11,6 +11,9 @@ from .comments import (
     get_deleted_comments_for_course,
     get_parent_comment,
     get_user_comments,
+    get_user_deleted_comment_count,
+    restore_comment,
+    restore_user_deleted_comments,
     update_comment,
 )
 from .flags import (
@@ -31,7 +34,10 @@ from .threads import (
     get_course_id_by_thread,
     get_deleted_threads_for_course,
     get_thread,
+    get_user_deleted_threads_count,
     get_user_threads,
+    restore_thread,
+    restore_user_deleted_threads,
     update_thread,
 )
 from .users import (

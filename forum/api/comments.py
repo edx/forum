@@ -246,16 +246,20 @@ def delete_comment(comment_id: str, course_id: Optional[str] = None, deleted_by:
         backend,
         exclude_fields=["endorsement", "sk"],
     )
-    # Soft delete comment instead of hard delete
-    backend.soft_delete_comment(comment_id, deleted_by)
-    # backend.delete_comment(comment_id)
     author_id = comment["author_id"]
     comment_course_id = comment["course_id"]
     parent_comment_id = data["parent_id"]
     if parent_comment_id:
         backend.update_stats_for_course(author_id, comment_course_id, replies=-1)
     else:
-        backend.update_stats_for_course(author_id, comment_course_id, responses=-1)
+        child_count = comment.get("child_count", 0)
+        if child_count > 0:
+            for child in backend.get_comments(parent_id=comment_id):
+                if child.get('is_deleted', False):
+                    child_count -= 1
+        backend.update_stats_for_course(author_id, comment_course_id, responses=-1, replies=-child_count)
+    backend.soft_delete_comment(comment_id, deleted_by)
+    # backend.delete_comment(comment_id)
     return data
 
 
@@ -409,3 +413,57 @@ def get_deleted_comments_for_course(course_id: str, page: int = 1, per_page: int
     """
     backend = get_backend(course_id)()
     return backend.get_deleted_comments_for_course(course_id, page, per_page, author_id)
+
+
+def restore_comment(comment_id: str, course_id: Optional[str] = None, restored_by: Optional[str] = None) -> bool:
+    """
+    Restore a soft-deleted comment.
+    
+    Args:
+        comment_id (str): The ID of the comment to restore
+        course_id (str, optional): The course ID for backend selection
+        restored_by (str, optional): The ID of the user performing the restoration
+        
+    Returns:
+        bool: True if comment was restored, False if not found
+    """
+    backend = get_backend(course_id)()
+    return backend.restore_comment(comment_id, restored_by=restored_by)
+
+
+def get_user_deleted_comment_count(user_id: str, course_ids: list[str], course_id: Optional[str] = None) -> int:
+    """
+    Get count of deleted comments for a user across courses.
+    
+    Args:
+        user_id (str): The ID of the user
+        course_ids (list): List of course IDs to search in
+        course_id (str, optional): Course ID for backend selection (uses first from list if not provided)
+        
+    Returns:
+        int: Count of deleted comments
+    """
+    backend = get_backend(course_id or course_ids[0])()
+    return backend.get_user_deleted_comment_count(user_id, course_ids)
+
+
+def restore_user_deleted_comments(
+    user_id: str, 
+    course_ids: list[str], 
+    course_id: Optional[str] = None,
+    restored_by: Optional[str] = None
+) -> int:
+    """
+    Restore all deleted comments for a user across courses.
+    
+    Args:
+        user_id (str): The ID of the user whose comments to restore
+        course_ids (list): List of course IDs to restore comments in
+        course_id (str, optional): Course ID for backend selection (uses first from list if not provided)
+        restored_by (str, optional): The ID of the user performing the restoration
+        
+    Returns:
+        int: Number of comments restored
+    """
+    backend = get_backend(course_id or course_ids[0])()
+    return backend.restore_user_deleted_comments(user_id, course_ids, restored_by=restored_by)
