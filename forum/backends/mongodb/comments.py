@@ -477,15 +477,20 @@ class Comment(BaseContents):
                 # Check if comment is anonymous
                 if not (comment.get('anonymous') or comment.get('anonymous_to_peers')):
                     if parent_comment_id:
-                        # This is a reply - increment replies count
-                        MongoBackend.update_stats_for_course(author_id, course_id, replies=1)
+                        # This is a reply - increment replies count and decrement deleted_replies
+                        MongoBackend.update_stats_for_course(
+                            author_id, course_id, replies=1, deleted_replies=-1
+                        )
                     else:
-                        # This is a response - increment responses count and replies by child count
+                        # This is a response - increment responses count, decrement deleted_responses
+                        # Also increment replies by child count and decrement deleted_replies by child_count
                         MongoBackend.update_stats_for_course(
                             author_id, 
                             course_id, 
-                            responses=1, 
-                            replies=child_count
+                            responses=1,
+                            deleted_responses=-1,
+                            replies=child_count,
+                            deleted_replies=-child_count
                         )
             
             return True

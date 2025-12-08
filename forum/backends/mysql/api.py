@@ -1382,10 +1382,18 @@ class MySQLBackend(AbstractBackend):
             comments_updated_at or timezone.now() - timedelta(days=365 * 100),
         )
 
+        # Count deleted content
+        deleted_threads = threads.filter(is_deleted=True).count()
+        deleted_responses = responses.filter(is_deleted=True).count()
+        deleted_replies = replies.filter(is_deleted=True).count()
+
         stats, _ = CourseStat.objects.get_or_create(user=author, course_id=course_id)
         stats.threads = threads.count()
         stats.responses = responses.count()
         stats.replies = replies.count()
+        stats.deleted_threads = deleted_threads
+        stats.deleted_responses = deleted_responses
+        stats.deleted_replies = deleted_replies
         stats.active_flags = active_flags
         stats.inactive_flags = inactive_flags
         stats.last_activity_at = updated_at

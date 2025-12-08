@@ -372,8 +372,10 @@ class CommentThread(BaseContents):
                 from forum.backends.mongodb.api import MongoBackend
                 # Check if thread is anonymous
                 if not (thread.get('anonymous') or thread.get('anonymous_to_peers')):
-                    # Increment threads count in user stats
-                    MongoBackend.update_stats_for_course(author_id, course_id, threads=1)
+                    # Increment threads count and decrement deleted_threads count in user stats
+                    MongoBackend.update_stats_for_course(
+                        author_id, course_id, threads=1, deleted_threads=-1
+                    )
             
             return True
         

@@ -63,6 +63,9 @@ class CourseStat(models.Model):
     threads: models.IntegerField[int, int] = models.IntegerField(default=0)
     responses: models.IntegerField[int, int] = models.IntegerField(default=0)
     replies: models.IntegerField[int, int] = models.IntegerField(default=0)
+    deleted_threads: models.IntegerField[int, int] = models.IntegerField(default=0)
+    deleted_responses: models.IntegerField[int, int] = models.IntegerField(default=0)
+    deleted_replies: models.IntegerField[int, int] = models.IntegerField(default=0)
     last_activity_at: models.DateTimeField[Optional[datetime], datetime] = (
         models.DateTimeField(default=None, null=True, blank=True)
     )
@@ -79,6 +82,9 @@ class CourseStat(models.Model):
             "threads": self.threads,
             "responses": self.responses,
             "replies": self.replies,
+            "deleted_threads": self.deleted_threads,
+            "deleted_responses": self.deleted_responses,
+            "deleted_replies": self.deleted_replies,
             "course_id": self.course_id,
             "last_activity_at": self.last_activity_at,
         }

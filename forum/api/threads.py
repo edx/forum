@@ -196,7 +196,7 @@ def delete_thread(thread_id: str, course_id: Optional[str] = None, deleted_by: O
     # result = backend.delete_thread(thread_id)
     if result and not (thread["anonymous"] or thread["anonymous_to_peers"]):
         backend.update_stats_for_course(
-            thread["author_id"], thread["course_id"], threads=-1
+            thread["author_id"], thread["course_id"], threads=-1, deleted_threads=1
         )
 
     return serialized_data

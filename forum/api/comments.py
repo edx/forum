@@ -250,14 +250,18 @@ def delete_comment(comment_id: str, course_id: Optional[str] = None, deleted_by:
     comment_course_id = comment["course_id"]
     parent_comment_id = data["parent_id"]
     if parent_comment_id:
-        backend.update_stats_for_course(author_id, comment_course_id, replies=-1)
+        backend.update_stats_for_course(author_id, comment_course_id, replies=-1, deleted_replies=1)
     else:
         child_count = comment.get("child_count", 0)
         if child_count > 0:
             for child in backend.get_comments(parent_id=comment_id):
                 if child.get('is_deleted', False):
                     child_count -= 1
-        backend.update_stats_for_course(author_id, comment_course_id, responses=-1, replies=-child_count)
+        backend.update_stats_for_course(
+            author_id, comment_course_id, 
+            responses=-1, deleted_responses=1,
+            replies=-child_count, deleted_replies=child_count
+        )
     backend.soft_delete_comment(comment_id, deleted_by)
     # backend.delete_comment(comment_id)
     return data
