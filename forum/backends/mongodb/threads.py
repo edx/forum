@@ -351,19 +351,6 @@ class CommentThread(BaseContents):
         )
         
         if result.matched_count > 0:
-            # Restore all soft-deleted comments in this thread
-            # This will automatically update comment counts and user stats
-            comment_model = Comment()
-            deleted_comments = comment_model.find({
-                "comment_thread_id": ObjectId(thread_id),
-                "is_deleted": True
-            })
-            
-            for comment in deleted_comments:
-                comment_id = comment.get("_id")
-                if comment_id:
-                    comment_model.restore_comment(str(comment_id), restored_by=restored_by)
-            
             # Update user course stats for the thread itself
             author_id = thread.get("author_id")
             course_id = thread.get("course_id")

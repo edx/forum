@@ -458,7 +458,7 @@ class Comment(BaseContents):
                 # Count child comments that are not deleted
                 child_count = 0
                 if not comment.get("parent_id"):  # If this is a parent comment
-                    for child in self.find({"parent_id": ObjectId(comment_id), "is_deleted": {"$ne": False}}):
+                    for child in self.find({"parent_id": ObjectId(comment_id), "is_deleted": {"$eq": False}}):
                             child_count += 1
                 
                 # Increment comment count in thread (1 for this comment + its non-deleted children)
@@ -535,7 +535,7 @@ class Comment(BaseContents):
         query_params = {
             "course_id": {"$in": course_ids},
             "author_id": str(user_id),
-            "is_deleted": True
+            "is_deleted": {"$eq": True}
         }
         
         comments_restored = 0
