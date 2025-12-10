@@ -914,12 +914,19 @@ class MongoBackend(AbstractBackend):
     @staticmethod
     def soft_delete_comments_of_a_thread(thread_id: str, deleted_by: str = None) -> None:
         """Soft delete all comments of a thread by marking them as deleted."""
+        count_of_response_deleted = 0
+        count_of_replies_deleted = 0
         for comment in Comment().get_list(
             comment_thread_id=ObjectId(thread_id),
             depth=0,
             parent_id=None,
+            is_deleted=False,
         ):
-            Comment().delete(comment["_id"], deleted_by=deleted_by, mode='soft')
+           count_of_response, count_of_replies =  Comment().delete(comment["_id"], deleted_by=deleted_by, mode='soft')
+           count_of_response_deleted += count_of_response
+           count_of_replies_deleted += count_of_replies
+
+        return count_of_response_deleted, count_of_replies_deleted
 
     @staticmethod
     def delete_subscriptions_of_a_thread(thread_id: str) -> None:

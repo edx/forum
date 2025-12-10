@@ -180,7 +180,7 @@ def delete_thread(thread_id: str, course_id: Optional[str] = None, deleted_by: O
         ) from exc
 
     # Soft delete comments and thread instead of hard delete
-    backend.soft_delete_comments_of_a_thread(thread_id, deleted_by)
+    count_of_response_deleted, count_of_replies_deleted = backend.soft_delete_comments_of_a_thread(thread_id, deleted_by)
     # backend.delete_comments_of_a_thread(thread_id)
     thread = backend.validate_object("CommentThread", thread_id)
 
@@ -196,7 +196,7 @@ def delete_thread(thread_id: str, course_id: Optional[str] = None, deleted_by: O
     # result = backend.delete_thread(thread_id)
     if result and not (thread["anonymous"] or thread["anonymous_to_peers"]):
         backend.update_stats_for_course(
-            thread["author_id"], thread["course_id"], threads=-1, deleted_threads=1
+            thread["author_id"], thread["course_id"], threads=-1, responses=-count_of_response_deleted, replies=-count_of_replies_deleted, deleted_threads=1, deleted_responses=count_of_response_deleted, deleted_replies=count_of_replies_deleted
         )
 
     return serialized_data

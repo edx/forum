@@ -311,7 +311,7 @@ class Comment(BaseContents):
             sender=self.__class__, comment_id=_id
         )
 
-        return no_of_comments_delete
+        return result_count,child_comments_deleted_count
 
     def get_author_username(self, author_id: str) -> str | None:
         """Return username for the respective author_id(user_id)"""
@@ -458,8 +458,7 @@ class Comment(BaseContents):
                 # Count child comments that are not deleted
                 child_count = 0
                 if not comment.get("parent_id"):  # If this is a parent comment
-                    for child in self.find({"parent_id": ObjectId(comment_id)}):
-                        if not child.get('is_deleted', False):
+                    for child in self.find({"parent_id": ObjectId(comment_id), "is_deleted": {"$ne": False}}):
                             child_count += 1
                 
                 # Increment comment count in thread (1 for this comment + its non-deleted children)
