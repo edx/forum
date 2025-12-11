@@ -608,6 +608,7 @@ class MySQLBackend(AbstractBackend):
         raw_query: bool = False,
         commentable_ids: Optional[list[str]] = None,
         is_moderator: bool = False,
+        is_deleted: bool = False,
     ) -> dict[str, Any]:
         """
         Handles complex thread queries based on various filters and returns paginated results.
@@ -653,7 +654,7 @@ class MySQLBackend(AbstractBackend):
                 raise ValueError("User does not exist") from exc
         # Base query
         base_query = CommentThread.objects.filter(
-            pk__in=mysql_comment_thread_ids, context=context, is_deleted=False  # Exclude soft deleted threads
+            pk__in=mysql_comment_thread_ids, context=context, is_deleted=is_deleted
         )
 
         # Group filtering
@@ -989,11 +990,21 @@ class MySQLBackend(AbstractBackend):
     @staticmethod
     def soft_delete_comments_of_a_thread(thread_id: str, deleted_by: str = None) -> None:
         """Soft delete comments of a thread by marking them as deleted."""
-        Comment.objects.filter(comment_thread__pk=thread_id, parent=None).update(
+
+        count_of_replies_deleted = 0
+        count_of_response_deleted = Comment.objects.filter(comment_thread__pk=thread_id, parent=None).update(
             is_deleted=True,
             deleted_at=timezone.now(),
             deleted_by=deleted_by
         )
+        for comment in Comment.objects.filter(comment_thread__pk=thread_id, parent=None):
+            child_comments = Comment.objects.filter(parent=comment, is_deleted=False)
+            count_of_replies_deleted+=child_comments.update(
+                is_deleted=True,
+                deleted_at=timezone.now(),
+                deleted_by=deleted_by
+            )
+        return count_of_response_deleted, count_of_replies_deleted
 
     @classmethod
     def delete_subscriptions_of_a_thread(cls, thread_id: str) -> None:
@@ -1553,7 +1564,7 @@ class MySQLBackend(AbstractBackend):
         comment = Comment.objects.get(pk=comment_id)
         comment.is_deleted = True
         comment.deleted_at = timezone.now()
-        comment.deleted_by = deleted_by
+        comment.deleted_by = User.objects.get(pk=deleted_by)
         comment.save()
 
     @staticmethod
@@ -1804,7 +1815,7 @@ class MySQLBackend(AbstractBackend):
     def get_thread(thread_id: str) -> dict[str, Any] | None:
         """Return thread from thread_id."""
         try:
-            thread = CommentThread.objects.get(pk=thread_id, is_deleted=False)  # Exclude soft deleted threads
+            thread = CommentThread.objects.get(pk=thread_id)
         except CommentThread.DoesNotExist:
             return None
         return thread.to_dict()
@@ -1868,7 +1879,7 @@ class MySQLBackend(AbstractBackend):
             return 0
         thread.is_deleted = True
         thread.deleted_at = timezone.now()
-        thread.deleted_by = deleted_by
+        thread.deleted_by = User.objects.get(pk=int(deleted_by))
         thread.save()
         return 1
 
@@ -2365,11 +2376,9 @@ class MySQLBackend(AbstractBackend):
         """Get deleted threads for a course."""
         query = CommentThread.objects.filter(
             course_id=course_id,
-            is_deleted=True
+            is_deleted=True,
+            author__username=author_id
         ).order_by('-deleted_at')
-        
-        if author_id:
-            query = query.filter(author__external_id=author_id)
             
         # Get total count
         total_count = query.count()
@@ -2379,7 +2388,7 @@ class MySQLBackend(AbstractBackend):
         try:
             page_obj = paginator.page(page)
             threads = [thread.to_dict() for thread in page_obj.object_list]
-        except Exception:
+        except Exception as e:
             threads = []
         
         return {
@@ -2394,11 +2403,10 @@ class MySQLBackend(AbstractBackend):
         """Get deleted comments for a course."""
         query = Comment.objects.filter(
             course_id=course_id,
-            is_deleted=True
+            is_deleted=True,
+            author__username=author_id
         ).order_by('-deleted_at')
         
-        if author_id:
-            query = query.filter(author__external_id=author_id)
             
         # Get total count
         total_count = query.count()
