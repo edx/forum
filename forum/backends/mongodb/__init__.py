@@ -2,6 +2,11 @@
 Mongo Models
 """
 
+from .bans import (
+    DiscussionBanExceptions,
+    DiscussionBans,
+    DiscussionModerationLogs,
+)
 from .comments import Comment
 from .contents import BaseContents, Contents
 from .subscriptions import Subscriptions
@@ -13,6 +18,9 @@ __all__ = [
     "Comment",
     "Contents",
     "CommentThread",
+    "DiscussionBanExceptions",
+    "DiscussionBans",
+    "DiscussionModerationLogs",
     "Subscriptions",
     "Users",
     "MODEL_INDICES",
