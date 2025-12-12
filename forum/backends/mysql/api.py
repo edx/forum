@@ -62,6 +62,9 @@ class MySQLBackend(AbstractBackend):
             course_stat.threads = 0
             course_stat.responses = 0
             course_stat.replies = 0
+            course_stat.deleted_threads = 0
+            course_stat.deleted_responses = 0
+            course_stat.deleted_replies = 0
 
         for key, value in kwargs.items():
             if hasattr(course_stat, key):
