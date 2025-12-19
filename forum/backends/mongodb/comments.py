@@ -62,6 +62,9 @@ class Comment(BaseContents):
             "created_at": doc.get("created_at"),
             "updated_at": doc.get("updated_at"),
             "title": doc.get("title"),
+            "is_deleted": doc.get("is_deleted", False),
+            "deleted_at": doc.get("deleted_at"),
+            "deleted_by": doc.get("deleted_by"),
         }
 
     def insert(
@@ -166,6 +169,9 @@ class Comment(BaseContents):
         endorsement_user_id: Optional[str] = None,
         sk: Optional[str] = None,
         is_spam: Optional[bool] = None,
+        is_deleted: Optional[bool] = None,
+        deleted_at: Optional[datetime] = None,
+        deleted_by: Optional[str] = None,
     ) -> int:
         """
         Updates a comment document in the database.
@@ -210,6 +216,9 @@ class Comment(BaseContents):
             ("closed", closed),
             ("sk", sk),
             ("is_spam", is_spam),
+            ("is_deleted", is_deleted),
+            ("deleted_at", deleted_at),
+            ("deleted_by", deleted_by),
         ]
         update_data: dict[str, Any] = {
             field: value for field, value in fields if value is not None
@@ -252,30 +261,49 @@ class Comment(BaseContents):
 
         return result.modified_count
 
-    def delete(self, _id: str) -> int:
+    def delete(  # type: ignore[override]
+        self, _id: str, mode: str = "hard", deleted_by: Optional[str] = None
+    ) -> tuple[int, int]:
         """
         Deletes a comment from the database based on the id.
 
         Args:
             _id: The ID of the comment.
+            mode: 'hard' for permanent deletion, 'soft' for marking as deleted.
+            deleted_by: User ID of who deleted the comment (used in soft delete).
 
         Returns:
             The number of comments deleted.
         """
         comment = self.get(_id)
         if not comment:
-            return 0
+            return 0, 0
 
         parent_comment_id = comment.get("parent_id")
         child_comments_deleted_count = 0
         if not parent_comment_id:
-            child_comments_deleted_count = self.delete_child_comments(_id)
+            child_comments_deleted_count = self.delete_child_comments(
+                _id, mode=mode, deleted_by=deleted_by
+            )
 
-        result = self._collection.delete_one({"_id": ObjectId(_id)})
-        if parent_comment_id:
-            self.update_child_count_in_parent_comment(parent_comment_id, -1)
+        if mode == "soft":
+            # Soft delete: mark as deleted
+            self.update(
+                _id,
+                is_deleted=True,
+                deleted_at=datetime.now(),
+                deleted_by=deleted_by,
+            )
+            result_count = 1
+        else:
+            # Hard delete: permanently remove
+            result = self._collection.delete_one({"_id": ObjectId(_id)})
+            result_count = result.deleted_count
+        if mode == "hard":
+            if parent_comment_id:
+                self.update_child_count_in_parent_comment(parent_comment_id, -1)
 
-        no_of_comments_delete = result.deleted_count + child_comments_deleted_count
+        no_of_comments_delete = result_count + child_comments_deleted_count
         comment_thread_id = comment["comment_thread_id"]
 
         self.update_comment_count_in_comment_thread(
@@ -287,37 +315,62 @@ class Comment(BaseContents):
             sender=self.__class__, comment_id=_id
         )
 
-        return no_of_comments_delete
+        return result_count, child_comments_deleted_count
 
     def get_author_username(self, author_id: str) -> str | None:
         """Return username for the respective author_id(user_id)"""
         user = Users().get(author_id)
         return user.get("username") if user else None
 
-    def delete_child_comments(self, _id: str) -> int:
+    def delete_child_comments(
+        self, _id: str, mode: str = "hard", deleted_by: Optional[str] = None
+    ) -> int:
         """
         Delete child comments from the database based on the id.
 
         Args:
             _id: The ID of the parent comment whose child comments will be deleted.
+            mode: 'hard' for permanent deletion, 'soft' for marking as deleted.
+            deleted_by: User ID of who deleted the comments (used in soft delete).
 
         Returns:
             The number of child comments deleted.
         """
-        child_comments_to_delete = self.find({"parent_id": ObjectId(_id)})
+        if mode == "soft":
+            child_comments_to_delete = self.find(
+                {"parent_id": ObjectId(_id), "is_deleted": {"$ne": True}}
+            )
+        else:
+            child_comments_to_delete = self.find({"parent_id": ObjectId(_id)})
+
         child_comment_ids_to_delete = [
             child_comment.get("_id") for child_comment in child_comments_to_delete
         ]
-        child_comments_deleted = self._collection.delete_many(
-            {"_id": {"$in": child_comment_ids_to_delete}}
-        )
+
+        if mode == "soft":
+            # Soft delete: mark all child comments as deleted
+            deleted_at = datetime.now()
+            for child_comment_id in child_comment_ids_to_delete:
+                self.update(
+                    str(child_comment_id),
+                    is_deleted=True,
+                    deleted_at=deleted_at,
+                    deleted_by=deleted_by,
+                )
+            child_comments_deleted_count = len(child_comment_ids_to_delete)
+        else:
+            # Hard delete: permanently remove
+            child_comments_deleted = self._collection.delete_many(
+                {"_id": {"$in": child_comment_ids_to_delete}}
+            )
+            child_comments_deleted_count = child_comments_deleted.deleted_count
 
         for child_comment_id in child_comment_ids_to_delete:
             get_handler_by_name("comment_deleted").send(
                 sender=self.__class__, comment_id=child_comment_id
             )
 
-        return child_comments_deleted.deleted_count
+        return child_comments_deleted_count
 
     def update_child_count_in_parent_comment(self, parent_id: str, count: int) -> None:
         """
@@ -367,3 +420,147 @@ class Comment(BaseContents):
         """Updates sk field."""
         sk = self.get_sk(_id, parent_id)
         self.update(_id, sk=sk)
+
+    def restore_comment(
+        self, comment_id: str, restored_by: Optional[str] = None
+    ) -> bool:
+        """
+        Restores a soft-deleted comment by setting is_deleted=False and clearing deletion metadata.
+        Also updates thread comment count and user course stats.
+
+        Args:
+            comment_id: The ID of the comment to restore
+            restored_by: The ID of the user performing the restoration (optional)
+
+        Returns:
+            bool: True if comment was restored, False if not found
+        """
+
+        # Get the comment first to check if it exists and get metadata
+        comment = self.get(comment_id)
+        if not comment:
+            return False
+
+        # Only restore if it's actually deleted
+        if not comment.get("is_deleted", False):
+            return True  # Already restored
+
+        update_data: dict[str, Any] = {
+            "is_deleted": False,
+            "deleted_at": None,
+            "deleted_by": None,
+        }
+
+        if restored_by:
+            update_data["restored_by"] = restored_by
+            update_data["restored_at"] = datetime.now().isoformat()
+
+        result = self._collection.update_one(
+            {"_id": ObjectId(comment_id)}, {"$set": update_data}
+        )
+
+        if result.matched_count > 0:
+            # Update thread comment count
+            comment_thread_id = comment.get("comment_thread_id")
+            if comment_thread_id:
+                # Count child comments that are not deleted
+                child_count = 0
+                if not comment.get("parent_id"):  # If this is a parent comment
+                    for _ in self.find(
+                        {
+                            "parent_id": ObjectId(comment_id),
+                            "is_deleted": {"$eq": False},
+                        }
+                    ):
+                        child_count += 1
+
+                # Increment comment count in thread (1 for this comment + its non-deleted children)
+                self.update_comment_count_in_comment_thread(
+                    comment_thread_id, 1 + child_count
+                )
+
+            # Update user course stats
+            author_id = comment.get("author_id")
+            course_id = comment.get("course_id")
+            parent_comment_id = comment.get("parent_id")
+
+            if author_id and course_id:
+
+                # Check if comment is anonymous
+                if not (comment.get("anonymous") or comment.get("anonymous_to_peers")):
+                    from forum.backends.mongodb.api import (  # pylint: disable=import-outside-toplevel
+                        MongoBackend,
+                    )
+
+                    if parent_comment_id:
+                        # This is a reply - increment replies count and decrement deleted_replies
+                        MongoBackend.update_stats_for_course(
+                            author_id, course_id, replies=1, deleted_replies=-1
+                        )
+                    else:
+                        # This is a response - increment responses count, decrement deleted_responses
+                        # Also increment replies by child count and decrement deleted_replies by child_count
+                        MongoBackend.update_stats_for_course(
+                            author_id,
+                            course_id,
+                            responses=1,
+                            deleted_responses=-1,
+                            replies=child_count,
+                            deleted_replies=-child_count,
+                        )
+
+            return True
+
+        return False
+
+    def get_user_deleted_comment_count(
+        self, user_id: str, course_ids: list[str]
+    ) -> int:
+        """
+        Returns count of deleted comments for user in the given course_ids.
+
+        Args:
+            user_id: The ID of the user
+            course_ids: List of course IDs to search in
+
+        Returns:
+            int: Count of deleted comments
+        """
+        query_params = {
+            "course_id": {"$in": course_ids},
+            "author_id": str(user_id),
+            "_type": self.content_type,
+            "is_deleted": True,
+        }
+        return self._collection.count_documents(query_params)
+
+    def restore_user_deleted_comments(
+        self, user_id: str, course_ids: list[str], restored_by: Optional[str] = None
+    ) -> int:
+        """
+        Restores (undeletes) comments of user in the given course_ids by setting is_deleted=False.
+
+        Args:
+            user_id: The ID of the user whose comments to restore
+            course_ids: List of course IDs to restore comments in
+            restored_by: The ID of the user performing the restoration (optional)
+
+        Returns:
+            int: Number of comments restored
+        """
+        query_params = {
+            "course_id": {"$in": course_ids},
+            "author_id": str(user_id),
+            "is_deleted": {"$eq": True},
+        }
+
+        comments_restored = 0
+        comments = self.get_list(**query_params)
+
+        for comment in comments:
+            comment_id = comment.get("_id")
+            if comment_id:
+                if self.restore_comment(str(comment_id), restored_by=restored_by):
+                    comments_restored += 1
+
+        return comments_restored

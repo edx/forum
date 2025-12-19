@@ -32,10 +32,10 @@ def test_delete() -> None:
 
     invalid_id = "66dedf65a2e0d02feebde812"
     result = Comment().delete(invalid_id)
-    assert result == 0
+    assert result == (0, 0)
 
     result = Comment().delete(comment_id)
-    assert result == 1
+    assert result == (1, 0)
     comment_data = Comment().get(_id=comment_id)
     assert comment_data is None
 
