@@ -9,6 +9,44 @@ import model_utils.fields
 import opaque_keys.edx.django.models
 
 
+def populate_source_with_ai(apps, schema_editor):
+    """
+    Populate existing ModerationAuditLog records with source='ai'.
+    
+    This migration updates all existing records in production to have source='ai'.
+    After AlterField runs, the field will exist with default='ai', but any records
+    that were created before this migration might have source='human' (the old default).
+    This function updates those records to 'ai'.
+    
+    Note: This assumes the 'source' field already exists in the database.
+    If migration 0005 didn't create it, AlterField will add it with default='ai'.
+    """
+    ModerationAuditLog = apps.get_model('forum', 'ModerationAuditLog')
+    
+    # Update all existing records that don't have source='ai'
+    # This handles records that may have source='human' from the old default
+    # If field doesn't exist yet, this will be skipped (AlterField will add it)
+    try:
+        ModerationAuditLog.objects.exclude(source='ai').update(source='ai')
+    except Exception:
+        # Field might not exist yet, AlterField will handle adding it
+        pass
+
+
+def reverse_populate_source(apps, schema_editor):
+    """
+    Reverse migration: Set source back to 'human' for records that were updated.
+    
+    Note: This is a best-effort reversal. We can't perfectly restore the original
+    state since we don't know which records were originally 'human' vs 'ai'.
+    We set them all back to 'human' as a safe default.
+    """
+    ModerationAuditLog = apps.get_model('forum', 'ModerationAuditLog')
+    
+    # Set all records back to 'human' as a safe default
+    ModerationAuditLog.objects.filter(source='ai').update(source='human')
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -129,5 +167,29 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name='discussionban',
             constraint=models.UniqueConstraint(condition=models.Q(('is_active', True), ('scope', 'organization')), fields=('user', 'org_key'), name='unique_active_org_ban'),
+        ),
+        # Set default value for ModerationAuditLog.source field to 'ai' and update existing production data
+        # First, alter/add the field definition to set default='ai' in Django
+        # This will add the field if it doesn't exist, or alter it if it does
+        migrations.AlterField(
+            model_name='moderationauditlog',
+            name='source',
+            field=models.CharField(
+                choices=[
+                    ('human', 'Human Moderator'),
+                    ('ai', 'AI Classifier'),
+                    ('system', 'System/Automated'),
+                ],
+                db_index=True,
+                default='ai',  # Changed from 'human' to 'ai'
+                help_text='Who initiated the moderation action',
+                max_length=20,
+            ),
+        ),
+        # Then populate existing records with source='ai'
+        # This updates any records that might have been created with the old default
+        migrations.RunPython(
+            populate_source_with_ai,
+            reverse_populate_source,
         ),
     ]

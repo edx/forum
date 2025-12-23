@@ -792,84 +792,230 @@ class MongoContent(models.Model):
 
 
 class ModerationAuditLog(models.Model):
-    """Audit log for AI moderation decisions on spam content."""
+    """
+    Unified audit log for all discussion moderation actions.
 
-    # Available actions that can be taken on spam content
+    Tracks both human moderator actions (bans, content removal) and
+    AI moderation decisions (spam detection, auto-flagging).
+    """
+
+    # Moderation source - who initiated the action
+    SOURCE_HUMAN = "human"
+    SOURCE_AI = "ai"
+    SOURCE_SYSTEM = "system"
+    SOURCE_CHOICES = [
+        (SOURCE_HUMAN, "Human Moderator"),
+        (SOURCE_AI, "AI Classifier"),
+        (SOURCE_SYSTEM, "System/Automated"),
+    ]
+
+    # Unified action types for both human and AI moderation
+    # Human moderator actions on users
+    ACTION_BAN = "ban_user"
+    ACTION_BAN_REACTIVATE = "ban_reactivate"
+    ACTION_UNBAN = "unban_user"
+    ACTION_BAN_EXCEPTION = "ban_exception"
+    ACTION_BULK_DELETE = "bulk_delete"
+    # AI/Human actions on content
+    ACTION_FLAGGED = "flagged"
+    ACTION_SOFT_DELETED = "soft_deleted"
+    ACTION_APPROVED = "approved"
+    ACTION_NO_ACTION = "no_action"
+
     ACTION_CHOICES = [
-        ("flagged", "Content Flagged"),
-        ("soft_deleted", "Content Soft Deleted"),
-        ("no_action", "No Action Taken"),
+        # Human moderator actions on users
+        (ACTION_BAN, "Ban User"),
+        (ACTION_BAN_REACTIVATE, "Ban Reactivated"),
+        (ACTION_UNBAN, "Unban User"),
+        (ACTION_BAN_EXCEPTION, "Ban Exception Created"),
+        (ACTION_BULK_DELETE, "Bulk Delete"),
+        # AI/Human actions on content
+        (ACTION_FLAGGED, "Content Flagged"),
+        (ACTION_SOFT_DELETED, "Content Soft Deleted"),
+        (ACTION_APPROVED, "Content Approved"),
+        (ACTION_NO_ACTION, "No Action Taken"),
     ]
 
-    # Only spam classifications since we don't store non-spam entries
+    # AI classification types (only for AI moderation)
+    CLASSIFICATION_SPAM = "spam"
+    CLASSIFICATION_SPAM_OR_SCAM = "spam_or_scam"
     CLASSIFICATION_CHOICES = [
-        ("spam", "Spam"),
-        ("spam_or_scam", "Spam or Scam"),
+        (CLASSIFICATION_SPAM, "Spam"),
+        (CLASSIFICATION_SPAM_OR_SCAM, "Spam or Scam"),
     ]
 
-    timestamp: models.DateTimeField[datetime, datetime] = models.DateTimeField(
-        default=timezone.now, help_text="When the moderation decision was made"
+    # === Core Fields ===
+    action_type: models.CharField[str, str] = models.CharField(
+        max_length=50,
+        choices=ACTION_CHOICES,
+        db_index=True,
+        help_text="Type of moderation action taken",
     )
-    body: models.TextField[str, str] = models.TextField(
-        help_text="The content body that was moderated"
-    )
-    classifier_output: models.JSONField[dict[str, Any], dict[str, Any]] = (
-        models.JSONField(help_text="Full output from the AI classifier")
-    )
-    reasoning: models.TextField[str, str] = models.TextField(
-        help_text="AI reasoning for the decision"
-    )
-    classification: models.CharField[str, str] = models.CharField(
+    source: models.CharField[str, str] = models.CharField(
         max_length=20,
-        choices=CLASSIFICATION_CHOICES,
-        help_text="AI classification result",
+        choices=SOURCE_CHOICES,
+        default=SOURCE_AI,
+        db_index=True,
+        help_text="Who initiated the moderation action",
     )
-    actions_taken: models.JSONField[list[str], list[str]] = models.JSONField(
-        default=list,
-        help_text="List of actions taken based on moderation (e.g., ['flagged', 'soft_deleted'])",
+    timestamp: models.DateTimeField[datetime, datetime] = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+        help_text="When the moderation action was taken",
     )
-    confidence_score: models.FloatField[Optional[float], float] = models.FloatField(
-        null=True, blank=True, help_text="AI confidence score if available"
+
+    # === Target Fields ===
+    # For user-targeted actions (bans/unbans)
+    target_user: models.ForeignKey[Optional[User], Optional[User]] = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="moderation_actions_received",
+        db_index=True,
+        help_text="Target user for user moderation actions (ban/unban)",
     )
-    moderator_override: models.BooleanField[bool, bool] = models.BooleanField(
-        default=False, help_text="Whether a human moderator overrode the AI decision"
+    # For content-targeted actions (AI moderation)
+    body: models.TextField[Optional[str], str] = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Content body that was moderated (for content moderation)",
     )
-    override_reason: models.TextField[Optional[str], str] = models.TextField(
-        blank=True, null=True, help_text="Reason for moderator override"
+    original_author: models.ForeignKey[Optional[User], Optional[User]] = (
+        models.ForeignKey(
+            User,
+            on_delete=models.CASCADE,
+            null=True,
+            blank=True,
+            related_name="moderated_content",
+            help_text="Original author of the moderated content",
+        )
     )
-    moderator: models.ForeignKey[User, User] = models.ForeignKey(
+
+    # === Actor Fields ===
+    moderator: models.ForeignKey[Optional[User], Optional[User]] = models.ForeignKey(
         User,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name="moderation_actions",
-        help_text="Human moderator who made override",
+        related_name="moderation_actions_performed",
+        db_index=True,
+        help_text="Human moderator who performed or overrode the action",
     )
-    original_author: models.ForeignKey[User, User] = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name="moderated_content",
-        help_text="Original author of the moderated content",
+
+    # === Context Fields ===
+    course_id: models.CharField[Optional[str], str] = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Course ID for course-level moderation actions",
+    )
+    scope: models.CharField[Optional[str], str] = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Scope of moderation (course/organization)",
+    )
+    reason: models.TextField[Optional[str], str] = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Reason provided for the moderation action",
+    )
+
+    # === AI-specific Fields (only populated for source='ai') ===
+    classifier_output: models.JSONField[Optional[dict[str, Any]], dict[str, Any]] = (
+        models.JSONField(
+            null=True,
+            blank=True,
+            help_text="Full output from the AI classifier",
+        )
+    )
+    classification: models.CharField[Optional[str], str] = models.CharField(
+        max_length=20,
+        choices=CLASSIFICATION_CHOICES,
+        null=True,
+        blank=True,
+        help_text="AI classification result",
+    )
+    actions_taken: models.JSONField[Optional[list[str]], list[str]] = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="List of actions taken (for AI: ['flagged', 'soft_deleted'])",
+    )
+    confidence_score: models.FloatField[Optional[float], float] = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="AI confidence score if available",
+    )
+    reasoning: models.TextField[Optional[str], str] = models.TextField(
+        null=True,
+        blank=True,
+        help_text="AI reasoning for the decision",
+    )
+
+    # === Override Fields (when human overrides AI) ===
+    moderator_override: models.BooleanField[bool, bool] = models.BooleanField(
+        default=False,
+        help_text="Whether a human moderator overrode the AI decision",
+    )
+    override_reason: models.TextField[Optional[str], str] = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Reason for moderator override",
+    )
+
+    # === Flexible Metadata ===
+    metadata: models.JSONField[Optional[dict[str, Any]], dict[str, Any]] = (
+        models.JSONField(
+            null=True,
+            blank=True,
+            help_text="Additional context (task IDs, counts, etc.)",
+        )
     )
 
     def to_dict(self) -> dict[str, Any]:
         """Return a dictionary representation of the model."""
-        return {
+        data: dict[str, Any] = {
             "_id": str(self.pk),
+            "action_type": self.action_type,
+            "source": self.source,
             "timestamp": self.timestamp.isoformat(),
-            "body": self.body,
-            "classifier_output": self.classifier_output,
-            "reasoning": self.reasoning,
-            "classification": self.classification,
-            "actions_taken": self.actions_taken,
-            "confidence_score": self.confidence_score,
-            "moderator_override": self.moderator_override,
-            "override_reason": self.override_reason,
             "moderator_id": str(self.moderator.pk) if self.moderator else None,
             "moderator_username": self.moderator.username if self.moderator else None,
-            "original_author_id": str(self.original_author.pk),
-            "original_author_username": self.original_author.username,
+            "course_id": self.course_id,
+            "scope": self.scope,
+            "reason": self.reason,
+            "metadata": self.metadata,
         }
+
+        # Add user moderation fields
+        if self.target_user:
+            data["target_user_id"] = str(self.target_user.pk)
+            data["target_user_username"] = self.target_user.username
+
+        # Add content moderation fields
+        if self.body:
+            data["body"] = self.body
+        if self.original_author:
+            data["original_author_id"] = str(self.original_author.pk)
+            data["original_author_username"] = self.original_author.username
+
+        # Add AI-specific fields
+        if self.source == self.SOURCE_AI:
+            data.update(
+                {
+                    "classifier_output": self.classifier_output,
+                    "classification": self.classification,
+                    "actions_taken": self.actions_taken,
+                    "confidence_score": self.confidence_score,
+                    "reasoning": self.reasoning,
+                    "moderator_override": self.moderator_override,
+                    "override_reason": self.override_reason,
+                }
+            )
+
+        return data
 
     class Meta:
         app_label = "forum"
@@ -878,9 +1024,13 @@ class ModerationAuditLog(models.Model):
         ordering = ["-timestamp"]
         indexes = [
             models.Index(fields=["timestamp"]),
+            models.Index(fields=["action_type", "-timestamp"]),
+            models.Index(fields=["source", "-timestamp"]),
+            models.Index(fields=["target_user", "-timestamp"]),
+            models.Index(fields=["original_author", "-timestamp"]),
+            models.Index(fields=["moderator", "-timestamp"]),
+            models.Index(fields=["course_id", "-timestamp"]),
             models.Index(fields=["classification"]),
-            models.Index(fields=["original_author"]),
-            models.Index(fields=["moderator"]),
         ]
 
 
