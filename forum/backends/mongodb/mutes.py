@@ -34,7 +34,7 @@ class DiscussionMutes(MongoBaseModel):
             scope: Scope filter (personal/course) (optional)
             
         Returns:
-            List of active mute documents
+            List of active mute documents with serialized ObjectIds
         """
         query = {
             "muted_user_id": muted_user_id,
@@ -46,8 +46,10 @@ class DiscussionMutes(MongoBaseModel):
             query["muted_by_id"] = muted_by_id
         if scope:
             query["scope"] = scope
-            
-        return list(self._collection.find(query))
+        
+        # Get mute documents and serialize ObjectId fields for JSON compatibility    
+        mute_docs = list(self._collection.find(query))
+        return self._serialize_objectids_in_list(mute_docs)
 
     def create_mute(
         self, 
@@ -172,7 +174,7 @@ class DiscussionMutes(MongoBaseModel):
             scope: Scope filter ('personal', 'course', or 'all')
             
         Returns:
-            List of active mute records
+            List of active mute records with serialized ObjectIds
         """
         query = {"course_id": course_id, "is_active": True}
         
@@ -183,7 +185,9 @@ class DiscussionMutes(MongoBaseModel):
         elif scope == "course":
             query["scope"] = "course"
         
-        return list(self._collection.find(query))
+        # Get mute documents and serialize ObjectId fields for JSON compatibility
+        mute_docs = list(self._collection.find(query))
+        return self._serialize_objectids_in_list(mute_docs)
 
     def get_user_mute_status(
         self, 
@@ -368,9 +372,11 @@ class DiscussionMuteExceptions(MongoBaseModel):
             course_id: Course identifier
             
         Returns:
-            List of exception documents
+            List of exception documents with serialized ObjectIds
         """
-        return list(self._collection.find({"course_id": course_id}))
+        # Get exception documents and serialize ObjectId fields for JSON compatibility
+        exception_docs = list(self._collection.find({"course_id": course_id}))
+        return self._serialize_objectids_in_list(exception_docs)
 
 
 class DiscussionModerationLogs(MongoBaseModel):
@@ -437,17 +443,20 @@ class DiscussionModerationLogs(MongoBaseModel):
             limit: Maximum number of logs to return
             
         Returns:
-            List of log documents
+            List of log documents with serialized ObjectIds
         """
         query = {"target_user_id": user_id}
         if course_id:
             query["course_id"] = course_id
             
-        return list(
+        # Get log documents and serialize ObjectId fields for JSON compatibility
+        log_docs = list(
             self._collection.find(query)
             .sort("timestamp", -1)
             .limit(limit)
         )
+        
+        return self._serialize_objectids_in_list(log_docs)
 
     def get_logs_for_course(
         self, 
@@ -464,14 +473,17 @@ class DiscussionModerationLogs(MongoBaseModel):
             limit: Maximum number of logs to return
             
         Returns:
-            List of log documents
+            List of log documents with serialized ObjectIds
         """
         query = {"course_id": course_id}
         if action_type:
             query["action_type"] = action_type
             
-        return list(
+        # Get log documents and serialize ObjectId fields for JSON compatibility
+        log_docs = list(
             self._collection.find(query)
             .sort("timestamp", -1)
             .limit(limit)
         )
+        
+        return self._serialize_objectids_in_list(log_docs)
