@@ -159,16 +159,12 @@ def get_thread(
         raise ForumV2RequestError("Failed to prepare thread API response") from error
 
 
-def delete_thread(
-    thread_id: str, course_id: Optional[str] = None, deleted_by: Optional[str] = None
-) -> dict[str, Any]:
+def delete_thread(thread_id: str, course_id: Optional[str] = None) -> dict[str, Any]:
     """
     Delete the thread for the given thread_id.
 
     Parameters:
         thread_id: The ID of the thread to be deleted.
-        course_id: The ID of the course (optional).
-        deleted_by: The ID of the user performing the delete (optional).
     Response:
         The details of the thread that is deleted.
     """
@@ -181,9 +177,7 @@ def delete_thread(
             f"Thread does not exist with Id: {thread_id}"
         ) from exc
 
-    count_of_response_deleted, count_of_replies_deleted = (
-        backend.soft_delete_comments_of_a_thread(thread_id, deleted_by)
-    )
+    backend.delete_comments_of_a_thread(thread_id)
     thread = backend.validate_object("CommentThread", thread_id)
 
     try:
@@ -193,17 +187,10 @@ def delete_thread(
         raise ForumV2RequestError("Failed to prepare thread API response") from error
 
     backend.delete_subscriptions_of_a_thread(thread_id)
-    result = backend.soft_delete_thread(thread_id, deleted_by)
+    result = backend.delete_thread(thread_id)
     if result and not (thread["anonymous"] or thread["anonymous_to_peers"]):
         backend.update_stats_for_course(
-            thread["author_id"],
-            thread["course_id"],
-            threads=-1,
-            responses=-count_of_response_deleted,
-            replies=-count_of_replies_deleted,
-            deleted_threads=1,
-            deleted_responses=count_of_response_deleted,
-            deleted_replies=count_of_replies_deleted,
+            thread["author_id"], thread["course_id"], threads=-1
         )
 
     return serialized_data
@@ -406,7 +393,6 @@ def get_user_threads(
         "user_id": user_id,
         "group_id": group_id,
         "group_ids": group_ids,
-        "is_deleted": kwargs.get("is_deleted", False),
         "context": kwargs.get("context"),
     }
     params = {k: v for k, v in params.items() if v is not None}
@@ -433,65 +419,4 @@ def get_course_id_by_thread(thread_id: str) -> str | None:
         MongoBackend.get_course_id_by_thread_id(thread_id)
         or MySQLBackend.get_course_id_by_thread_id(thread_id)
         or None
-    )
-
-
-def get_deleted_threads_for_course(
-    course_id: str, page: int = 1, per_page: int = 20, author_id: Optional[str] = None
-) -> dict[str, Any]:
-    """
-    Get deleted threads for a specific course.
-
-    Args:
-        course_id (str): The course identifier
-        page (int): Page number for pagination (default: 1)
-        per_page (int): Number of threads per page (default: 20)
-        author_id (str, optional): Filter by author ID
-
-    Returns:
-        dict: Dictionary containing deleted threads and pagination info
-    """
-    backend = get_backend(course_id)()
-    return backend.get_deleted_threads_for_course(course_id, page, per_page, author_id)
-
-
-def restore_thread(
-    thread_id: str, course_id: Optional[str] = None, restored_by: Optional[str] = None
-) -> bool:
-    """
-    Restore a soft-deleted thread.
-
-    Args:
-        thread_id (str): The ID of the thread to restore
-        course_id (str, optional): The course ID for backend selection
-        restored_by (str, optional): The ID of the user performing the restoration
-
-    Returns:
-        bool: True if thread was restored, False if not found
-    """
-    backend = get_backend(course_id)()
-    return backend.restore_thread(thread_id, restored_by=restored_by)
-
-
-def restore_user_deleted_threads(
-    user_id: str,
-    course_ids: list[str],
-    course_id: Optional[str] = None,
-    restored_by: Optional[str] = None,
-) -> int:
-    """
-    Restore all deleted threads for a user across courses.
-
-    Args:
-        user_id (str): The ID of the user whose threads to restore
-        course_ids (list): List of course IDs to restore threads in
-        course_id (str, optional): Course ID for backend selection (uses first from list if not provided)
-        restored_by (str, optional): The ID of the user performing the restoration
-
-    Returns:
-        int: Number of threads restored
-    """
-    backend = get_backend(course_id or course_ids[0])()
-    return backend.restore_user_deleted_threads(
-        user_id, course_ids, restored_by=restored_by
     )

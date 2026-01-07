@@ -81,9 +81,6 @@ class CommentThread(BaseContents):
             "author_id": doc.get("author_id"),
             "group_id": doc.get("group_id"),
             "thread_id": str(doc.get("_id")),
-            "is_deleted": doc.get("is_deleted", False),
-            "deleted_at": doc.get("deleted_at"),
-            "deleted_by": doc.get("deleted_by"),
         }
 
     def insert(
@@ -211,9 +208,6 @@ class CommentThread(BaseContents):
         group_id: Optional[int] = None,
         skip_timestamp_update: bool = False,
         is_spam: Optional[bool] = None,
-        is_deleted: Optional[bool] = None,
-        deleted_at: Optional[datetime] = None,
-        deleted_by: Optional[str] = None,
     ) -> int:
         """
         Updates a thread document in the database.
@@ -268,9 +262,6 @@ class CommentThread(BaseContents):
             ("closed_by_id", closed_by_id),
             ("group_id", group_id),
             ("is_spam", is_spam),
-            ("is_deleted", is_deleted),
-            ("deleted_at", deleted_at),
-            ("deleted_by", deleted_by),
         ]
         update_data: dict[str, Any] = {
             field: value for field, value in fields if value is not None
@@ -310,113 +301,3 @@ class CommentThread(BaseContents):
         """Return username for the respective author_id(user_id)"""
         user = Users().get(author_id)
         return user.get("username") if user else None
-
-    def restore_thread(self, thread_id: str, restored_by: Optional[str] = None) -> bool:
-        """
-        Restores a soft-deleted thread by setting is_deleted=False and clearing deletion metadata.
-        Also restores all soft-deleted comments in the thread and updates user course stats.
-
-        Args:
-            thread_id: The ID of the thread to restore
-            restored_by: The ID of the user performing the restoration (optional)
-
-        Returns:
-            bool: True if thread was restored, False if not found
-        """
-
-        # Get the thread first to check if it exists and get metadata
-        thread = self.get(thread_id)
-        if not thread:
-            return False
-
-        # Only restore if it's actually deleted
-        if not thread.get("is_deleted", False):
-            return True  # Already restored
-
-        update_data: dict[str, Any] = {
-            "is_deleted": False,
-            "deleted_at": None,
-            "deleted_by": None,
-        }
-
-        if restored_by:
-            update_data["restored_by"] = restored_by
-            update_data["restored_at"] = datetime.now().isoformat()
-
-        result = self._collection.update_one(
-            {"_id": ObjectId(thread_id)}, {"$set": update_data}
-        )
-
-        if result.matched_count > 0:
-            # Update user course stats for the thread itself
-            author_id = thread.get("author_id")
-            course_id = thread.get("course_id")
-
-            if author_id and course_id:
-
-                # Check if thread is anonymous
-                if not (thread.get("anonymous") or thread.get("anonymous_to_peers")):
-                    from forum.backends.mongodb.api import (  # pylint: disable=import-outside-toplevel
-                        MongoBackend,
-                    )
-
-                    # Increment threads count and decrement deleted_threads count in user stats
-                    MongoBackend.update_stats_for_course(
-                        author_id, course_id, threads=1, deleted_threads=-1
-                    )
-
-            return True
-
-        return False
-
-    def get_user_deleted_threads_count(
-        self, user_id: str, course_ids: list[str]
-    ) -> int:
-        """
-        Returns count of deleted threads for user in the given course_ids.
-
-        Args:
-            user_id: The ID of the user
-            course_ids: List of course IDs to search in
-
-        Returns:
-            int: Count of deleted threads
-        """
-        query_params = {
-            "course_id": {"$in": course_ids},
-            "author_id": str(user_id),
-            "_type": self.content_type,
-            "is_deleted": True,
-        }
-        return self._collection.count_documents(query_params)
-
-    def restore_user_deleted_threads(
-        self, user_id: str, course_ids: list[str], restored_by: Optional[str] = None
-    ) -> int:
-        """
-        Restores (undeletes) threads of user in the given course_ids by setting is_deleted=False.
-
-        Args:
-            user_id: The ID of the user whose threads to restore
-            course_ids: List of course IDs to restore threads in
-            restored_by: The ID of the user performing the restoration (optional)
-
-        Returns:
-            int: Number of threads restored
-        """
-        query_params = {
-            "course_id": {"$in": course_ids},
-            "author_id": str(user_id),
-            "is_deleted": True,
-        }
-
-        threads_restored = 0
-        threads = self.get_list(**query_params)
-
-        for thread in threads:
-            thread_id = thread.get("_id")
-            if thread_id:
-                if self.restore_thread(str(thread_id), restored_by=restored_by):
-                    threads_restored += 1
-
-        return threads_restored

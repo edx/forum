@@ -1,10 +1,9 @@
 """Test comments api endpoints."""
 
 from typing import Any
-
 import pytest
 
-from test_utils.client import APIClient  # pylint: disable=import-error
+from test_utils.client import APIClient
 
 pytestmark = pytest.mark.django_db
 
@@ -122,9 +121,7 @@ def test_update_comment_endorsed_api(
 
 def test_delete_parent_comment(api_client: APIClient, patched_get_backend: Any) -> None:
     """
-    Test soft-deleting a parent comment.
-
-    Note: Soft delete marks the comment as deleted (is_deleted=True) but doesn't remove it.
+    Test deleting a comment.
     """
     backend = patched_get_backend
     user_id, _, parent_comment_id = setup_models(backend)
@@ -140,16 +137,12 @@ def test_delete_parent_comment(api_client: APIClient, patched_get_backend: Any) 
     assert response.status_code == 200
     response = api_client.delete_json(f"/api/v2/comments/{parent_comment_id}")
     assert response.status_code == 200
-    deleted_comment = backend.get_comment(parent_comment_id)
-    assert deleted_comment is None or deleted_comment.get("is_deleted") is True
+    assert backend.get_comment(parent_comment_id) is None
 
 
 def test_delete_child_comment(api_client: APIClient, patched_get_backend: Any) -> None:
     """
-    Test soft-deleting a child comment.
-
-    Note: Soft delete marks the comment as deleted but does NOT decrement
-    the parent's child_count (this matches the MongoDB behavior).
+    Test creating a new child comment.
     """
     backend = patched_get_backend
     user_id, _, parent_comment_id = setup_models(backend)
@@ -172,14 +165,13 @@ def test_delete_child_comment(api_client: APIClient, patched_get_backend: Any) -
     response = api_client.delete_json(f"/api/v2/comments/{child_comment_id}")
     assert previous_child_count is not None
     assert response.status_code == 200
-    deleted_child = backend.get_comment(child_comment_id)
-    assert deleted_child is None or deleted_child.get("is_deleted") is True
+    assert backend.get_comment(child_comment_id) is None
 
     parent_comment = backend.get_comment(parent_comment_id) or {}
     new_child_count = parent_comment.get("child_count")
 
     assert new_child_count is not None
-    assert new_child_count == previous_child_count
+    assert new_child_count == previous_child_count - 1
 
 
 def test_returns_400_when_comment_does_not_exist(
