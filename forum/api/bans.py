@@ -3,7 +3,6 @@ API functions for managing discussion bans.
 """
 
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from django.contrib.auth import get_user_model
@@ -14,7 +13,7 @@ from opaque_keys.edx.keys import CourseKey
 from forum.backends.mysql.models import (
     DiscussionBan,
     DiscussionBanException,
-    DiscussionModerationLog,
+    ModerationAuditLog,
 )
 
 User = get_user_model()
@@ -49,19 +48,20 @@ def ban_user(
     """
     if scope not in ['course', 'organization']:
         raise ValueError(f"Invalid scope: {scope}. Must be 'course' or 'organization'")
-    
+
     if scope == 'course' and not course_id:
         raise ValueError("course_id is required for course-level bans")
-    
+
     if scope == 'organization' and not org_key:
         raise ValueError("org_key is required for organization-level bans")
-    
+
     # Get user objects
     banned_user = User.objects.get(id=user_id)
     moderator = User.objects.get(id=banned_by_id)
-    
+
     with transaction.atomic():
         # Determine lookup kwargs based on scope
+        course_key = None  # Initialize for audit log
         if scope == 'organization':
             lookup_kwargs = {
                 'user': banned_user,
@@ -84,7 +84,7 @@ def ban_user(
                 **lookup_kwargs,
                 'org_key': course_org,  # Denormalized field for easier querying
             }
-        
+
         # Create or update ban
         ban, created = DiscussionBan.objects.get_or_create(
             **lookup_kwargs,
@@ -96,7 +96,7 @@ def ban_user(
                 'banned_at': timezone.now(),
             }
         )
-        
+
         if not created and not ban.is_active:
             # Reactivate previously deactivated ban
             ban.is_active = True
@@ -106,26 +106,36 @@ def ban_user(
             ban.unbanned_at = None
             ban.unbanned_by = None
             ban.save()
-        
+
         # Create audit log
-        DiscussionModerationLog.objects.create(
-            action_type=DiscussionModerationLog.ACTION_BAN,
+        ModerationAuditLog.objects.create(
+            action_type=ModerationAuditLog.ACTION_BAN,
+            source=ModerationAuditLog.SOURCE_HUMAN,
             target_user=banned_user,
             moderator=moderator,
-            course_id=course_key if scope == 'course' else None,
+            course_id=str(course_key) if course_key else None,
             scope=scope,
             reason=reason,
             metadata={
                 'ban_id': ban.id,
                 'created': created,
-            }
+            },
+            # AI moderation fields (required by schema, not applicable for ban actions)
+            body='',
+            original_author=banned_user,
+            classification='',
+            classifier_output={},
+            actions_taken=[],
+            confidence_score=None,
+            reasoning='',
+            moderator_override=False,
         )
-        
+
         log.info(
             "User banned: user_id=%s, scope=%s, course_id=%s, org_key=%s, banned_by=%s",
             user_id, scope, course_id, org_key, banned_by_id
         )
-    
+
     return _serialize_ban(ban)
 
 
@@ -157,18 +167,18 @@ def unban_user(
     """
     try:
         ban = DiscussionBan.objects.get(id=ban_id, is_active=True)
-    except DiscussionBan.DoesNotExist:
-        raise ValueError(f"Active ban with id {ban_id} not found")
-    
+    except DiscussionBan.DoesNotExist as exc:
+        raise ValueError(f"Active ban with id {ban_id} not found") from exc
+
     moderator = User.objects.get(id=unbanned_by_id)
     exception_created = False
     exception_data = None
-    
+
     with transaction.atomic():
         # For org-level bans with course_id: create exception instead of full unban
         if ban.scope == 'organization' and course_id:
             course_key = CourseKey.from_string(course_id)
-            
+
             # Create exception for this specific course
             exception, created = DiscussionBanException.objects.get_or_create(
                 ban=ban,
@@ -178,7 +188,7 @@ def unban_user(
                     'reason': reason or 'Course-level exception to organization ban',
                 }
             )
-            
+
             exception_created = True
             exception_data = {
                 'id': exception.id,
@@ -188,15 +198,16 @@ def unban_user(
                 'reason': exception.reason,
                 'created_at': exception.created.isoformat() if hasattr(exception, 'created') else None,
             }
-            
+
             message = f'User {ban.user.username} unbanned from {course_id} (org-level ban still active for other courses)'
-            
+
             # Audit log for exception
-            DiscussionModerationLog.objects.create(
-                action_type=DiscussionModerationLog.ACTION_BAN_EXCEPTION,
+            ModerationAuditLog.objects.create(
+                action_type=ModerationAuditLog.ACTION_BAN_EXCEPTION,
+                source=ModerationAuditLog.SOURCE_HUMAN,
                 target_user=ban.user,
                 moderator=moderator,
-                course_id=course_key,
+                course_id=str(course_key),
                 scope='organization',
                 reason=f"Exception to org ban: {reason}",
                 metadata={
@@ -204,7 +215,16 @@ def unban_user(
                     'exception_id': exception.id,
                     'exception_created': created,
                     'org_key': ban.org_key,
-                }
+                },
+                # AI moderation fields (required by schema, not applicable for ban actions)
+                body='',
+                original_author=ban.user,
+                classification='',
+                classifier_output={},
+                actions_taken=[],
+                confidence_score=None,
+                reasoning='',
+                moderator_override=False,
             )
         else:
             # Full unban (course-level or complete org-level unban)
@@ -212,27 +232,37 @@ def unban_user(
             ban.unbanned_at = timezone.now()
             ban.unbanned_by = moderator
             ban.save()
-            
+
             message = f'User {ban.user.username} unbanned successfully'
-            
+
             # Audit log
-            DiscussionModerationLog.objects.create(
-                action_type=DiscussionModerationLog.ACTION_UNBAN,
+            ModerationAuditLog.objects.create(
+                action_type=ModerationAuditLog.ACTION_UNBAN,
+                source=ModerationAuditLog.SOURCE_HUMAN,
                 target_user=ban.user,
                 moderator=moderator,
-                course_id=ban.course_id,
+                course_id=str(ban.course_id) if ban.course_id else None,
                 scope=ban.scope,
                 reason=f"Unban: {reason}",
                 metadata={
                     'ban_id': ban.id,
-                }
+                },
+                # AI moderation fields (required by schema, not applicable for ban actions)
+                body='',
+                original_author=ban.user,
+                classification='',
+                classifier_output={},
+                actions_taken=[],
+                confidence_score=None,
+                reasoning='',
+                moderator_override=False,
             )
-        
+
         log.info(
             "User unbanned: ban_id=%s, user_id=%s, exception_created=%s, unbanned_by=%s",
             ban_id, ban.user.id, exception_created, unbanned_by_id
         )
-    
+
     return {
         'status': 'success',
         'message': message,
@@ -259,27 +289,27 @@ def get_banned_users(
         list: List of ban records
     """
     queryset = DiscussionBan.objects.select_related('user', 'banned_by', 'unbanned_by')
-    
+
     if not include_inactive:
         queryset = queryset.filter(is_active=True)
-    
+
     if course_id:
         course_key = CourseKey.from_string(course_id)
         # Include both course-level bans and org-level bans for this course's org
-        from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
         try:
+            from openedx.core.djangoapps.content.course_overviews.models import CourseOverview  # pylint: disable=import-error,import-outside-toplevel
             course = CourseOverview.objects.get(id=course_key)
             queryset = queryset.filter(
                 models.Q(course_id=course_key) | models.Q(org_key=course.org)
             )
-        except CourseOverview.DoesNotExist:
-            # Fallback to just course-level bans
+        except (ImportError, Exception):  # pylint: disable=broad-exception-caught
+            # Fallback to just course-level bans if CourseOverview not available
             queryset = queryset.filter(course_id=course_key)
     elif org_key:
         queryset = queryset.filter(org_key=org_key)
-    
+
     queryset = queryset.order_by('-banned_at')
-    
+
     return [_serialize_ban(ban) for ban in queryset]
 
 

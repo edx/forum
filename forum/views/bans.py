@@ -17,7 +17,6 @@ from forum.serializers.bans import (
     BannedUserResponseSerializer,
     BannedUsersListSerializer,
     BanUserSerializer,
-    UnbanResponseSerializer,
     UnbanUserSerializer,
 )
 
@@ -60,14 +59,14 @@ class BanUserAPIView(APIView):
     def post(self, request: Request) -> Response:
         """Ban a user from discussions."""
         serializer = BanUserSerializer(data=request.data)
-        
+
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
+
         try:
             ban_data = ban_user(**serializer.validated_data)
             return Response(ban_data, status=status.HTTP_201_CREATED)
-        except ValueError as e:
+        except (ValueError, TypeError) as e:
             return Response(
                 {"error": str(e)},
                 status=status.HTTP_400_BAD_REQUEST
@@ -77,7 +76,7 @@ class BanUserAPIView(APIView):
                 {"error": "User not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             log.exception("Error banning user: %s", str(e))
             return Response(
                 {"error": "Failed to ban user"},
@@ -113,19 +112,27 @@ class UnbanUserAPIView(APIView):
     def post(self, request: Request, ban_id: int) -> Response:
         """Unban a user from discussions."""
         serializer = UnbanUserSerializer(data=request.data)
-        
+
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
+
         try:
             unban_data = unban_user(ban_id=ban_id, **serializer.validated_data)
-            response_serializer = UnbanResponseSerializer(data=unban_data)
-            response_serializer.is_valid(raise_exception=True)
-            return Response(response_serializer.data, status=status.HTTP_200_OK)
+            return Response(unban_data, status=status.HTTP_200_OK)
         except ValueError as e:
+            if "not found" in str(e).lower():
+                return Response(
+                    {"error": str(e)},
+                    status=status.HTTP_404_NOT_FOUND
+                )
             return Response(
                 {"error": str(e)},
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except TypeError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
             )
         except DiscussionBan.DoesNotExist:
             return Response(
@@ -137,7 +144,7 @@ class UnbanUserAPIView(APIView):
                 {"error": "Moderator user not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             log.exception("Error unbanning user: %s", str(e))
             return Response(
                 {"error": "Failed to unban user"},
@@ -179,15 +186,20 @@ class BannedUsersAPIView(APIView):
     def get(self, request: Request) -> Response:
         """Get list of banned users."""
         serializer = BannedUsersListSerializer(data=request.query_params)
-        
+
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
+
         try:
             banned_users = get_banned_users(**serializer.validated_data)
             response_serializer = BannedUserResponseSerializer(banned_users, many=True)
             return Response(response_serializer.data, status=status.HTTP_200_OK)
-        except Exception as e:
+        except (ValueError, TypeError) as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:  # pylint: disable=broad-exception-caught
             log.exception("Error fetching banned users: %s", str(e))
             return Response(
                 {"error": "Failed to fetch banned users"},
@@ -223,15 +235,18 @@ class BanDetailAPIView(APIView):
         """Get details of a specific ban."""
         try:
             ban_data = get_ban(ban_id)
-            response_serializer = BannedUserResponseSerializer(data=ban_data)
-            response_serializer.is_valid(raise_exception=True)
-            return Response(response_serializer.data, status=status.HTTP_200_OK)
+            return Response(ban_data, status=status.HTTP_200_OK)
         except DiscussionBan.DoesNotExist:
             return Response(
                 {"error": f"Ban with id {ban_id} not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
-        except Exception as e:
+        except (ValueError, TypeError) as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:  # pylint: disable=broad-exception-caught
             log.exception("Error fetching ban details: %s", str(e))
             return Response(
                 {"error": "Failed to fetch ban details"},

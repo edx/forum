@@ -1,5 +1,4 @@
-# Generated migration for discussion moderation models
-# Migrated from lms.djangoapps.discussion to forum app
+"""Migration to add discussion ban models to forum app."""
 
 from django.conf import settings
 from django.db import migrations, models
@@ -9,7 +8,7 @@ import model_utils.fields
 import opaque_keys.edx.django.models
 
 
-def populate_source_with_ai(apps, schema_editor):
+def populate_source_with_ai(apps, schema_editor):  # pylint: disable=unused-argument
     """
     Populate existing ModerationAuditLog records with source='ai'.
     
@@ -22,18 +21,14 @@ def populate_source_with_ai(apps, schema_editor):
     If migration 0005 didn't create it, AlterField will add it with default='ai'.
     """
     ModerationAuditLog = apps.get_model('forum', 'ModerationAuditLog')
-    
-    # Update all existing records that don't have source='ai'
-    # This handles records that may have source='human' from the old default
-    # If field doesn't exist yet, this will be skipped (AlterField will add it)
+
     try:
         ModerationAuditLog.objects.exclude(source='ai').update(source='ai')
-    except Exception:
-        # Field might not exist yet, AlterField will handle adding it
+    except Exception:  # pylint: disable=broad-exception-caught
         pass
 
 
-def reverse_populate_source(apps, schema_editor):
+def reverse_populate_source(apps, schema_editor):  # pylint: disable=unused-argument
     """
     Reverse migration: Set source back to 'human' for records that were updated.
     
@@ -42,12 +37,12 @@ def reverse_populate_source(apps, schema_editor):
     We set them all back to 'human' as a safe default.
     """
     ModerationAuditLog = apps.get_model('forum', 'ModerationAuditLog')
-    
-    # Set all records back to 'human' as a safe default
+
     ModerationAuditLog.objects.filter(source='ai').update(source='human')
 
 
 class Migration(migrations.Migration):
+    """Migration to add discussion ban and moderation models."""
 
     dependencies = [
         ('forum', '0005_moderationauditlog_comment_is_spam_and_more'),
@@ -55,8 +50,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # Create models - tables may already exist in production from discussion app
-        # but must be created in test environments
         migrations.CreateModel(
             name='DiscussionBan',
             fields=[
@@ -80,25 +73,7 @@ class Migration(migrations.Migration):
                 'db_table': 'discussion_user_ban',
             },
         ),
-        migrations.CreateModel(
-            name='DiscussionModerationLog',
-            fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('action_type', models.CharField(choices=[('ban_user', 'Ban User'), ('unban_user', 'Unban User'), ('ban_exception', 'Ban Exception Created'), ('bulk_delete', 'Bulk Delete')], db_index=True, max_length=50)),
-                ('course_id', opaque_keys.edx.django.models.CourseKeyField(db_index=True, max_length=255)),
-                ('scope', models.CharField(blank=True, max_length=20, null=True)),
-                ('reason', models.TextField(blank=True, null=True)),
-                ('metadata', models.JSONField(blank=True, null=True)),
-                ('created', models.DateTimeField(auto_now_add=True, db_index=True)),
-                ('moderator', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='moderation_actions_performed', to=settings.AUTH_USER_MODEL)),
-                ('target_user', models.ForeignKey(db_index=True, on_delete=django.db.models.deletion.CASCADE, related_name='moderation_actions_received', to=settings.AUTH_USER_MODEL)),
-            ],
-            options={
-                'verbose_name': 'Discussion Moderation Log',
-                'verbose_name_plural': 'Discussion Moderation Logs',
-                'db_table': 'discussion_moderation_log',
-            },
-        ),
+
         migrations.CreateModel(
             name='DiscussionBanException',
             fields=[
@@ -115,22 +90,6 @@ class Migration(migrations.Migration):
                 'verbose_name_plural': 'Discussion Ban Exceptions',
                 'db_table': 'discussion_ban_exception',
             },
-        ),
-        migrations.AddIndex(
-            model_name='discussionmoderationlog',
-            index=models.Index(fields=['target_user', '-created'], name='idx_target_user'),
-        ),
-        migrations.AddIndex(
-            model_name='discussionmoderationlog',
-            index=models.Index(fields=['moderator', '-created'], name='idx_moderator'),
-        ),
-        migrations.AddIndex(
-            model_name='discussionmoderationlog',
-            index=models.Index(fields=['course_id', '-created'], name='idx_course'),
-        ),
-        migrations.AddIndex(
-            model_name='discussionmoderationlog',
-            index=models.Index(fields=['action_type', '-created'], name='idx_action_type'),
         ),
         migrations.AddConstraint(
             model_name='discussionbanexception',
@@ -168,10 +127,101 @@ class Migration(migrations.Migration):
             model_name='discussionban',
             constraint=models.UniqueConstraint(condition=models.Q(('is_active', True), ('scope', 'organization')), fields=('user', 'org_key'), name='unique_active_org_ban'),
         ),
-        # Set default value for ModerationAuditLog.source field to 'ai' and update existing production data
-        # First, alter/add the field definition to set default='ai' in Django
-        # This will add the field if it doesn't exist, or alter it if it does
+        migrations.RemoveIndex(
+            model_name='moderationauditlog',
+            name='forum_moder_origina_c51089_idx',
+        ),
+        migrations.RemoveIndex(
+            model_name='moderationauditlog',
+            name='forum_moder_moderat_c62a1c_idx',
+        ),
+        migrations.AddField(
+            model_name='moderationauditlog',
+            name='action_type',
+            field=models.CharField(
+                choices=[
+                    ('ban_user', 'Ban User'),
+                    ('ban_reactivate', 'Ban Reactivated'),
+                    ('unban_user', 'Unban User'),
+                    ('ban_exception', 'Ban Exception Created'),
+                    ('bulk_delete', 'Bulk Delete'),
+                    ('flagged', 'Content Flagged'),
+                    ('soft_deleted', 'Content Soft Deleted'),
+                    ('approved', 'Content Approved'),
+                    ('no_action', 'No Action Taken')
+                ],
+                db_index=True,
+                default='no_action',
+                help_text='Type of moderation action taken',
+                max_length=50
+            ),
+        ),
+        migrations.AddField(
+            model_name='moderationauditlog',
+            name='course_id',
+            field=models.CharField(blank=True, db_index=True, help_text='Course ID for course-level moderation actions', max_length=255, null=True),
+        ),
+        migrations.AddField(
+            model_name='moderationauditlog',
+            name='metadata',
+            field=models.JSONField(blank=True, help_text='Additional context (task IDs, counts, etc.)', null=True),
+        ),
+        migrations.AddField(
+            model_name='moderationauditlog',
+            name='reason',
+            field=models.TextField(blank=True, help_text='Reason provided for the moderation action', null=True),
+        ),
+        migrations.AddField(
+            model_name='moderationauditlog',
+            name='scope',
+            field=models.CharField(blank=True, help_text='Scope of moderation (course/organization)', max_length=20, null=True),
+        ),
+        migrations.AddField(
+            model_name='moderationauditlog',
+            name='target_user',
+            field=models.ForeignKey(blank=True, help_text='Target user for user moderation actions (ban/unban)', null=True, on_delete=django.db.models.deletion.CASCADE, related_name='audit_log_actions_received', to=settings.AUTH_USER_MODEL),
+        ),
         migrations.AlterField(
+            model_name='moderationauditlog',
+            name='actions_taken',
+            field=models.JSONField(blank=True, help_text="List of actions taken (for AI: ['flagged', 'soft_deleted'])", null=True),
+        ),
+        migrations.AlterField(
+            model_name='moderationauditlog',
+            name='body',
+            field=models.TextField(blank=True, help_text='Content body that was moderated (for content moderation)', null=True),
+        ),
+        migrations.AlterField(
+            model_name='moderationauditlog',
+            name='classification',
+            field=models.CharField(blank=True, choices=[('spam', 'Spam'), ('spam_or_scam', 'Spam or Scam')], help_text='AI classification result', max_length=20, null=True),
+        ),
+        migrations.AlterField(
+            model_name='moderationauditlog',
+            name='classifier_output',
+            field=models.JSONField(blank=True, help_text='Full output from the AI classifier', null=True),
+        ),
+        migrations.AlterField(
+            model_name='moderationauditlog',
+            name='moderator',
+            field=models.ForeignKey(blank=True, help_text='Human moderator who performed or overrode the action', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='audit_log_actions_performed', to=settings.AUTH_USER_MODEL),
+        ),
+        migrations.AlterField(
+            model_name='moderationauditlog',
+            name='original_author',
+            field=models.ForeignKey(blank=True, help_text='Original author of the moderated content', null=True, on_delete=django.db.models.deletion.CASCADE, related_name='moderated_content', to=settings.AUTH_USER_MODEL),
+        ),
+        migrations.AlterField(
+            model_name='moderationauditlog',
+            name='reasoning',
+            field=models.TextField(blank=True, help_text='AI reasoning for the decision', null=True),
+        ),
+        migrations.AlterField(
+            model_name='moderationauditlog',
+            name='timestamp',
+            field=models.DateTimeField(db_index=True, default=django.utils.timezone.now, help_text='When the moderation action was taken'),
+        ),
+        migrations.AddField(
             model_name='moderationauditlog',
             name='source',
             field=models.CharField(
@@ -181,13 +231,35 @@ class Migration(migrations.Migration):
                     ('system', 'System/Automated'),
                 ],
                 db_index=True,
-                default='ai',  # Changed from 'human' to 'ai'
+                default='ai',
                 help_text='Who initiated the moderation action',
                 max_length=20,
             ),
         ),
-        # Then populate existing records with source='ai'
-        # This updates any records that might have been created with the old default
+        migrations.AddIndex(
+            model_name='moderationauditlog',
+            index=models.Index(fields=['action_type', '-timestamp'], name='forum_moder_action__32bd31_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='moderationauditlog',
+            index=models.Index(fields=['source', '-timestamp'], name='forum_moder_source_cf1224_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='moderationauditlog',
+            index=models.Index(fields=['target_user', '-timestamp'], name='forum_moder_target__cadf75_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='moderationauditlog',
+            index=models.Index(fields=['original_author', '-timestamp'], name='forum_moder_origina_6bb4d3_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='moderationauditlog',
+            index=models.Index(fields=['moderator', '-timestamp'], name='forum_moder_moderat_2c467c_idx'),
+        ),
+        migrations.AddIndex(
+            model_name='moderationauditlog',
+            index=models.Index(fields=['course_id', '-timestamp'], name='forum_moder_course__9cbd6e_idx'),
+        ),
         migrations.RunPython(
             populate_source_with_ai,
             reverse_populate_source,
