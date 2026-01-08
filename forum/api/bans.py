@@ -2,6 +2,8 @@
 API functions for managing discussion bans.
 """
 
+# mypy: ignore-errors
+
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -25,12 +27,12 @@ def ban_user(
     banned_by_id: str,
     course_id: Optional[str] = None,
     org_key: Optional[str] = None,
-    scope: str = 'course',
-    reason: str = '',
+    scope: str = "course",
+    reason: str = "",
 ) -> Dict[str, Any]:
     """
     Ban a user from discussions.
-    
+
     Args:
         user_id: ID of user to ban
         banned_by_id: ID of user performing the ban
@@ -38,21 +40,21 @@ def ban_user(
         org_key: Organization key for org-level bans
         scope: 'course' or 'organization'
         reason: Reason for the ban
-        
+
     Returns:
         dict: Ban record data including id, user info, scope, and timestamps
-        
+
     Raises:
         ValueError: If invalid parameters provided
         User.DoesNotExist: If user or banned_by user not found
     """
-    if scope not in ['course', 'organization']:
+    if scope not in ["course", "organization"]:
         raise ValueError(f"Invalid scope: {scope}. Must be 'course' or 'organization'")
 
-    if scope == 'course' and not course_id:
+    if scope == "course" and not course_id:
         raise ValueError("course_id is required for course-level bans")
 
-    if scope == 'organization' and not org_key:
+    if scope == "organization" and not org_key:
         raise ValueError("org_key is required for organization-level bans")
 
     # Get user objects
@@ -62,11 +64,11 @@ def ban_user(
     with transaction.atomic():
         # Determine lookup kwargs based on scope
         course_key = None  # Initialize for audit log
-        if scope == 'organization':
+        if scope == "organization":
             lookup_kwargs = {
-                'user': banned_user,
-                'org_key': org_key,
-                'scope': 'organization',
+                "user": banned_user,
+                "org_key": org_key,
+                "scope": "organization",
             }
             ban_kwargs = {
                 **lookup_kwargs,
@@ -74,15 +76,15 @@ def ban_user(
         else:
             course_key = CourseKey.from_string(course_id)
             # Extract org from course_id for denormalization
-            course_org = str(course_key.org) if hasattr(course_key, 'org') else org_key
+            course_org = str(course_key.org) if hasattr(course_key, "org") else org_key
             lookup_kwargs = {
-                'user': banned_user,
-                'course_id': course_key,
-                'scope': 'course',
+                "user": banned_user,
+                "course_id": course_key,
+                "scope": "course",
             }
             ban_kwargs = {
                 **lookup_kwargs,
-                'org_key': course_org,  # Denormalized field for easier querying
+                "org_key": course_org,  # Denormalized field for easier querying
             }
 
         # Create or update ban
@@ -90,11 +92,11 @@ def ban_user(
             **lookup_kwargs,
             defaults={
                 **ban_kwargs,
-                'banned_by': moderator,
-                'reason': reason or 'No reason provided',
-                'is_active': True,
-                'banned_at': timezone.now(),
-            }
+                "banned_by": moderator,
+                "reason": reason or "No reason provided",
+                "is_active": True,
+                "banned_at": timezone.now(),
+            },
         )
 
         if not created and not ban.is_active:
@@ -117,23 +119,27 @@ def ban_user(
             scope=scope,
             reason=reason,
             metadata={
-                'ban_id': ban.id,
-                'created': created,
+                "ban_id": ban.id,
+                "created": created,
             },
             # AI moderation fields (required by schema, not applicable for ban actions)
-            body='',
+            body="",
             original_author=banned_user,
-            classification='',
+            classification="",
             classifier_output={},
             actions_taken=[],
             confidence_score=None,
-            reasoning='',
+            reasoning="",
             moderator_override=False,
         )
 
         log.info(
             "User banned: user_id=%s, scope=%s, course_id=%s, org_key=%s, banned_by=%s",
-            user_id, scope, course_id, org_key, banned_by_id
+            user_id,
+            scope,
+            course_id,
+            org_key,
+            banned_by_id,
         )
 
     return _serialize_ban(ban)
@@ -143,24 +149,24 @@ def unban_user(
     ban_id: int,
     unbanned_by_id: str,
     course_id: Optional[str] = None,
-    reason: str = '',
+    reason: str = "",
 ) -> Dict[str, Any]:
     """
     Unban a user from discussions.
-    
+
     For course-level bans: Deactivates the ban completely.
     For org-level bans with course_id: Creates an exception for that course.
     For org-level bans without course_id: Deactivates the entire org ban.
-    
+
     Args:
         ban_id: ID of the ban to unban
         unbanned_by_id: ID of user performing the unban
         course_id: Optional course ID for org-level ban exceptions
         reason: Reason for unbanning
-        
+
     Returns:
         dict: Response with status, message, and ban/exception data
-        
+
     Raises:
         DiscussionBan.DoesNotExist: If ban not found
         User.DoesNotExist: If unbanned_by user not found
@@ -176,7 +182,7 @@ def unban_user(
 
     with transaction.atomic():
         # For org-level bans with course_id: create exception instead of full unban
-        if ban.scope == 'organization' and course_id:
+        if ban.scope == "organization" and course_id:
             course_key = CourseKey.from_string(course_id)
 
             # Create exception for this specific course
@@ -184,22 +190,29 @@ def unban_user(
                 ban=ban,
                 course_id=course_key,
                 defaults={
-                    'unbanned_by': moderator,
-                    'reason': reason or 'Course-level exception to organization ban',
-                }
+                    "unbanned_by": moderator,
+                    "reason": reason or "Course-level exception to organization ban",
+                },
             )
 
             exception_created = True
             exception_data = {
-                'id': exception.id,
-                'ban_id': ban.id,
-                'course_id': str(course_id),
-                'unbanned_by': moderator.username,
-                'reason': exception.reason,
-                'created_at': exception.created.isoformat() if hasattr(exception, 'created') else None,
+                "id": exception.id,
+                "ban_id": ban.id,
+                "course_id": str(course_id),
+                "unbanned_by": moderator.username,
+                "reason": exception.reason,
+                "created_at": (
+                    exception.created.isoformat()
+                    if hasattr(exception, "created")
+                    else None
+                ),
             }
 
-            message = f'User {ban.user.username} unbanned from {course_id} (org-level ban still active for other courses)'
+            message = (
+                f"User {ban.user.username} unbanned from {course_id} "
+                f"(org-level ban still active for other courses)"
+            )
 
             # Audit log for exception
             ModerationAuditLog.objects.create(
@@ -208,22 +221,22 @@ def unban_user(
                 target_user=ban.user,
                 moderator=moderator,
                 course_id=str(course_key),
-                scope='organization',
+                scope="organization",
                 reason=f"Exception to org ban: {reason}",
                 metadata={
-                    'ban_id': ban.id,
-                    'exception_id': exception.id,
-                    'exception_created': created,
-                    'org_key': ban.org_key,
+                    "ban_id": ban.id,
+                    "exception_id": exception.id,
+                    "exception_created": created,
+                    "org_key": ban.org_key,
                 },
                 # AI moderation fields (required by schema, not applicable for ban actions)
-                body='',
+                body="",
                 original_author=ban.user,
-                classification='',
+                classification="",
                 classifier_output={},
                 actions_taken=[],
                 confidence_score=None,
-                reasoning='',
+                reasoning="",
                 moderator_override=False,
             )
         else:
@@ -233,7 +246,7 @@ def unban_user(
             ban.unbanned_by = moderator
             ban.save()
 
-            message = f'User {ban.user.username} unbanned successfully'
+            message = f"User {ban.user.username} unbanned successfully"
 
             # Audit log
             ModerationAuditLog.objects.create(
@@ -245,30 +258,33 @@ def unban_user(
                 scope=ban.scope,
                 reason=f"Unban: {reason}",
                 metadata={
-                    'ban_id': ban.id,
+                    "ban_id": ban.id,
                 },
                 # AI moderation fields (required by schema, not applicable for ban actions)
-                body='',
+                body="",
                 original_author=ban.user,
-                classification='',
+                classification="",
                 classifier_output={},
                 actions_taken=[],
                 confidence_score=None,
-                reasoning='',
+                reasoning="",
                 moderator_override=False,
             )
 
         log.info(
             "User unbanned: ban_id=%s, user_id=%s, exception_created=%s, unbanned_by=%s",
-            ban_id, ban.user.id, exception_created, unbanned_by_id
+            ban_id,
+            ban.user.id,
+            exception_created,
+            unbanned_by_id,
         )
 
     return {
-        'status': 'success',
-        'message': message,
-        'exception_created': exception_created,
-        'ban': _serialize_ban(ban),
-        'exception': exception_data,
+        "status": "success",
+        "message": message,
+        "exception_created": exception_created,
+        "ban": _serialize_ban(ban),
+        "exception": exception_data,
     }
 
 
@@ -279,16 +295,16 @@ def get_banned_users(
 ) -> List[Dict[str, Any]]:
     """
     Get list of banned users.
-    
+
     Args:
         course_id: Filter by course ID (includes org-level bans for that course's org)
         org_key: Filter by organization key
         include_inactive: Include inactive (unbanned) users
-        
+
     Returns:
         list: List of ban records
     """
-    queryset = DiscussionBan.objects.select_related('user', 'banned_by', 'unbanned_by')
+    queryset = DiscussionBan.objects.select_related("user", "banned_by", "unbanned_by")
 
     if not include_inactive:
         queryset = queryset.filter(is_active=True)
@@ -297,7 +313,11 @@ def get_banned_users(
         course_key = CourseKey.from_string(course_id)
         # Include both course-level bans and org-level bans for this course's org
         try:
-            from openedx.core.djangoapps.content.course_overviews.models import CourseOverview  # pylint: disable=import-error,import-outside-toplevel
+            # pylint: disable=import-error,import-outside-toplevel
+            from openedx.core.djangoapps.content.course_overviews.models import (
+                CourseOverview,
+            )
+
             course = CourseOverview.objects.get(id=course_key)
             queryset = queryset.filter(
                 models.Q(course_id=course_key) | models.Q(org_key=course.org)
@@ -308,7 +328,7 @@ def get_banned_users(
     elif org_key:
         queryset = queryset.filter(org_key=org_key)
 
-    queryset = queryset.order_by('-banned_at')
+    queryset = queryset.order_by("-banned_at")
 
     return [_serialize_ban(ban) for ban in queryset]
 
@@ -316,50 +336,60 @@ def get_banned_users(
 def get_ban(ban_id: int) -> Dict[str, Any]:
     """
     Get a specific ban by ID.
-    
+
     Args:
         ban_id: ID of the ban
-        
+
     Returns:
         dict: Ban record data
-        
+
     Raises:
         DiscussionBan.DoesNotExist: If ban not found
     """
-    ban = DiscussionBan.objects.select_related('user', 'banned_by', 'unbanned_by').get(id=ban_id)
+    ban = DiscussionBan.objects.select_related("user", "banned_by", "unbanned_by").get(
+        id=ban_id
+    )
     return _serialize_ban(ban)
 
 
 def _serialize_ban(ban: DiscussionBan) -> Dict[str, Any]:
     """
     Serialize a ban object to dictionary.
-    
+
     Args:
         ban: DiscussionBan instance
-        
+
     Returns:
         dict: Serialized ban data
     """
     return {
-        'id': ban.id,
-        'user': {
-            'id': ban.user.id,
-            'username': ban.user.username,
-            'email': ban.user.email,
+        "id": ban.id,
+        "user": {
+            "id": ban.user.id,
+            "username": ban.user.username,
+            "email": ban.user.email,
         },
-        'course_id': str(ban.course_id) if ban.course_id else None,
-        'org_key': ban.org_key,
-        'scope': ban.scope,
-        'reason': ban.reason,
-        'is_active': ban.is_active,
-        'banned_at': ban.banned_at.isoformat() if ban.banned_at else None,
-        'banned_by': {
-            'id': ban.banned_by.id,
-            'username': ban.banned_by.username,
-        } if ban.banned_by else None,
-        'unbanned_at': ban.unbanned_at.isoformat() if ban.unbanned_at else None,
-        'unbanned_by': {
-            'id': ban.unbanned_by.id,
-            'username': ban.unbanned_by.username,
-        } if ban.unbanned_by else None,
+        "course_id": str(ban.course_id) if ban.course_id else None,
+        "org_key": ban.org_key,
+        "scope": ban.scope,
+        "reason": ban.reason,
+        "is_active": ban.is_active,
+        "banned_at": ban.banned_at.isoformat() if ban.banned_at else None,
+        "banned_by": (
+            {
+                "id": ban.banned_by.id,
+                "username": ban.banned_by.username,
+            }
+            if ban.banned_by
+            else None
+        ),
+        "unbanned_at": ban.unbanned_at.isoformat() if ban.unbanned_at else None,
+        "unbanned_by": (
+            {
+                "id": ban.unbanned_by.id,
+                "username": ban.unbanned_by.username,
+            }
+            if ban.unbanned_by
+            else None
+        ),
     }

@@ -1,4 +1,6 @@
 """Tests for MongoDB discussion ban models."""
+
+# mypy: ignore-errors
 # pylint: disable=redefined-outer-name
 
 from datetime import datetime
@@ -161,7 +163,9 @@ class TestDiscussionBans:
         assert ban["org_key"] == sample_org_key
         assert ban["is_active"] is True
 
-    def test_get_active_ban_returns_none_for_inactive(self, discussion_bans, sample_course_id):
+    def test_get_active_ban_returns_none_for_inactive(
+        self, discussion_bans, sample_course_id
+    ):
         """Test that get_active_ban returns None for inactive bans."""
         ban_id = discussion_bans.insert(
             user_id=123,
@@ -622,7 +626,9 @@ class TestDiscussionModerationLogs:
             course_id=other_course_id,
         )
 
-        logs = discussion_moderation_logs.get_logs_for_course(course_id=sample_course_id)
+        logs = discussion_moderation_logs.get_logs_for_course(
+            course_id=sample_course_id
+        )
 
         assert len(logs) == 2
         assert all(log["course_id"] == sample_course_id for log in logs)

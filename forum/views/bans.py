@@ -27,9 +27,9 @@ log = logging.getLogger(__name__)
 class BanUserAPIView(APIView):
     """
     API View to ban a user from discussions.
-    
+
     Endpoint: POST /api/v2/users/bans
-    
+
     Request Body:
         {
             "user_id": "123",
@@ -39,7 +39,7 @@ class BanUserAPIView(APIView):
             "org_key": "edX",  # required for organization scope
             "reason": "Posting spam content"
         }
-    
+
     Response:
         {
             "id": 1,
@@ -67,36 +67,32 @@ class BanUserAPIView(APIView):
             ban_data = ban_user(**serializer.validated_data)
             return Response(ban_data, status=status.HTTP_201_CREATED)
         except (ValueError, TypeError) as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
             return Response(
-                {"error": "User not found"},
-                status=status.HTTP_404_NOT_FOUND
+                {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:  # pylint: disable=broad-exception-caught
             log.exception("Error banning user: %s", str(e))
             return Response(
                 {"error": "Failed to ban user"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
 class UnbanUserAPIView(APIView):
     """
     API View to unban a user from discussions.
-    
+
     Endpoint: POST /api/v2/users/bans/<ban_id>/unban
-    
+
     Request Body:
         {
             "unbanned_by_id": "456",
             "course_id": "course-v1:edX+DemoX+Demo_Course",  # optional, for org-level ban exceptions
             "reason": "User appeal approved"
         }
-    
+
     Response:
         {
             "status": "success",
@@ -121,48 +117,38 @@ class UnbanUserAPIView(APIView):
             return Response(unban_data, status=status.HTTP_200_OK)
         except ValueError as e:
             if "not found" in str(e).lower():
-                return Response(
-                    {"error": str(e)},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+                return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except TypeError as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except DiscussionBan.DoesNotExist:
             return Response(
                 {"error": f"Active ban with id {ban_id} not found"},
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_404_NOT_FOUND,
             )
         except User.DoesNotExist:
             return Response(
-                {"error": "Moderator user not found"},
-                status=status.HTTP_404_NOT_FOUND
+                {"error": "Moderator user not found"}, status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:  # pylint: disable=broad-exception-caught
             log.exception("Error unbanning user: %s", str(e))
             return Response(
                 {"error": "Failed to unban user"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
 class BannedUsersAPIView(APIView):
     """
     API View to list banned users.
-    
+
     Endpoint: GET /api/v2/users/bans
-    
+
     Query Parameters:
         - course_id (optional): Filter by course ID
         - org_key (optional): Filter by organization key
         - include_inactive (optional): Include inactive bans (default: false)
-    
+
     Response:
         [
             {
@@ -195,24 +181,21 @@ class BannedUsersAPIView(APIView):
             response_serializer = BannedUserResponseSerializer(banned_users, many=True)
             return Response(response_serializer.data, status=status.HTTP_200_OK)
         except (ValueError, TypeError) as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:  # pylint: disable=broad-exception-caught
             log.exception("Error fetching banned users: %s", str(e))
             return Response(
                 {"error": "Failed to fetch banned users"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
 class BanDetailAPIView(APIView):
     """
     API View to get details of a specific ban.
-    
+
     Endpoint: GET /api/v2/users/bans/<ban_id>
-    
+
     Response:
         {
             "id": 1,
@@ -239,16 +222,13 @@ class BanDetailAPIView(APIView):
         except DiscussionBan.DoesNotExist:
             return Response(
                 {"error": f"Ban with id {ban_id} not found"},
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_404_NOT_FOUND,
             )
         except (ValueError, TypeError) as e:
-            return Response(
-                {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:  # pylint: disable=broad-exception-caught
             log.exception("Error fetching ban details: %s", str(e))
             return Response(
                 {"error": "Failed to fetch ban details"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )

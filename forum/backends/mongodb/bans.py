@@ -33,8 +33,8 @@ class DiscussionBans(MongoBaseModel):
 
     COLLECTION_NAME = "discussion_bans"
 
-    SCOPE_COURSE = 'course'
-    SCOPE_ORGANIZATION = 'organization'
+    SCOPE_COURSE = "course"
+    SCOPE_ORGANIZATION = "organization"
 
     def insert(
         self,
@@ -113,8 +113,7 @@ class DiscussionBans(MongoBaseModel):
             update_data["unbanned_at"] = unbanned_at
 
         result: UpdateResult = self._collection.update_one(
-            {"_id": ObjectId(ban_id)},
-            {"$set": update_data}
+            {"_id": ObjectId(ban_id)}, {"$set": update_data}
         )
         return result.modified_count
 
@@ -186,9 +185,7 @@ class DiscussionBans(MongoBaseModel):
         # Check organization-level ban first
         if check_org and org_name:
             org_ban = self.get_active_ban(
-                user_id=user_id,
-                org_key=org_name,
-                scope=self.SCOPE_ORGANIZATION
+                user_id=user_id, org_key=org_name, scope=self.SCOPE_ORGANIZATION
             )
 
             if org_ban:
@@ -201,9 +198,7 @@ class DiscussionBans(MongoBaseModel):
 
         # Check course-level ban
         course_ban = self.get_active_ban(
-            user_id=user_id,
-            course_id=course_id,
-            scope=self.SCOPE_COURSE
+            user_id=user_id, course_id=course_id, scope=self.SCOPE_COURSE
         )
 
         return course_ban is not None
@@ -302,10 +297,12 @@ class DiscussionBanExceptions(MongoBaseModel):
         Returns:
             True if exception exists, False otherwise
         """
-        exception = self._collection.find_one({
-            "ban_id": ObjectId(ban_id),
-            "course_id": course_id,
-        })
+        exception = self._collection.find_one(
+            {
+                "ban_id": ObjectId(ban_id),
+                "course_id": course_id,
+            }
+        )
         return exception is not None
 
     def get_exceptions_for_ban(
@@ -338,10 +335,12 @@ class DiscussionBanExceptions(MongoBaseModel):
         Returns:
             Number of documents deleted
         """
-        result = self._collection.delete_one({
-            "ban_id": ObjectId(ban_id),
-            "course_id": course_id,
-        })
+        result = self._collection.delete_one(
+            {
+                "ban_id": ObjectId(ban_id),
+                "course_id": course_id,
+            }
+        )
         return result.deleted_count
 
 
@@ -367,10 +366,10 @@ class DiscussionModerationLogs(MongoBaseModel):
 
     COLLECTION_NAME = "discussion_moderation_logs"
 
-    ACTION_BAN = 'ban_user'
-    ACTION_UNBAN = 'unban_user'
-    ACTION_BAN_EXCEPTION = 'ban_exception'
-    ACTION_BULK_DELETE = 'bulk_delete'
+    ACTION_BAN = "ban_user"
+    ACTION_UNBAN = "unban_user"
+    ACTION_BAN_EXCEPTION = "ban_exception"
+    ACTION_BULK_DELETE = "bulk_delete"
 
     def insert(
         self,
@@ -437,11 +436,7 @@ class DiscussionModerationLogs(MongoBaseModel):
         if action_type:
             query["action_type"] = action_type
 
-        return list(
-            self._collection.find(query)
-            .sort("created", -1)
-            .limit(limit)
-        )
+        return list(self._collection.find(query).sort("created", -1).limit(limit))
 
     def get_logs_for_course(
         self,
@@ -465,8 +460,4 @@ class DiscussionModerationLogs(MongoBaseModel):
         if action_type:
             query["action_type"] = action_type
 
-        return list(
-            self._collection.find(query)
-            .sort("created", -1)
-            .limit(limit)
-        )
+        return list(self._collection.find(query).sort("created", -1).limit(limit))
