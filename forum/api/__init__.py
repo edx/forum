@@ -16,6 +16,14 @@ from .flags import (
     update_comment_flag,
     update_thread_flag,
 )
+from .mutes import (
+    get_muted_users,
+    get_user_mute_status,
+    mute_user,
+    unmute_user,
+    mute_and_report_user,
+    get_all_muted_users_for_course,
+)
 from .pins import pin_thread, unpin_thread
 from .search import search_threads
 from .subscriptions import (
@@ -87,4 +95,10 @@ __all__ = [
     "update_user",
     "update_username",
     "update_users_in_course",
+    "mute_user",
+    "unmute_user",
+    "get_user_mute_status",
+    "get_muted_users",
+    "get_all_muted_users_for_course",
+    "mute_and_report_user",
 ]
