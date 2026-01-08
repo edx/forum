@@ -27,9 +27,9 @@ log = logging.getLogger(__name__)
 class BanUserAPIView(APIView):
     """
     API View to ban a user from discussions.
-    
+
     Endpoint: POST /api/v2/users/bans
-    
+
     Request Body:
         {
             "user_id": "123",
@@ -39,7 +39,7 @@ class BanUserAPIView(APIView):
             "org_key": "edX",  # required for organization scope
             "reason": "Posting spam content"
         }
-    
+
     Response:
         {
             "id": 1,
@@ -87,16 +87,16 @@ class BanUserAPIView(APIView):
 class UnbanUserAPIView(APIView):
     """
     API View to unban a user from discussions.
-    
+
     Endpoint: POST /api/v2/users/bans/<ban_id>/unban
-    
+
     Request Body:
         {
             "unbanned_by_id": "456",
             "course_id": "course-v1:edX+DemoX+Demo_Course",  # optional, for org-level ban exceptions
             "reason": "User appeal approved"
         }
-    
+
     Response:
         {
             "status": "success",
@@ -155,14 +155,14 @@ class UnbanUserAPIView(APIView):
 class BannedUsersAPIView(APIView):
     """
     API View to list banned users.
-    
+
     Endpoint: GET /api/v2/users/bans
-    
+
     Query Parameters:
         - course_id (optional): Filter by course ID
         - org_key (optional): Filter by organization key
         - include_inactive (optional): Include inactive bans (default: false)
-    
+
     Response:
         [
             {
@@ -210,9 +210,9 @@ class BannedUsersAPIView(APIView):
 class BanDetailAPIView(APIView):
     """
     API View to get details of a specific ban.
-    
+
     Endpoint: GET /api/v2/users/bans/<ban_id>
-    
+
     Response:
         {
             "id": 1,

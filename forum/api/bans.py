@@ -30,7 +30,7 @@ def ban_user(
 ) -> Dict[str, Any]:
     """
     Ban a user from discussions.
-    
+
     Args:
         user_id: ID of user to ban
         banned_by_id: ID of user performing the ban
@@ -38,10 +38,10 @@ def ban_user(
         org_key: Organization key for org-level bans
         scope: 'course' or 'organization'
         reason: Reason for the ban
-        
+
     Returns:
         dict: Ban record data including id, user info, scope, and timestamps
-        
+
     Raises:
         ValueError: If invalid parameters provided
         User.DoesNotExist: If user or banned_by user not found
@@ -147,20 +147,20 @@ def unban_user(
 ) -> Dict[str, Any]:
     """
     Unban a user from discussions.
-    
+
     For course-level bans: Deactivates the ban completely.
     For org-level bans with course_id: Creates an exception for that course.
     For org-level bans without course_id: Deactivates the entire org ban.
-    
+
     Args:
         ban_id: ID of the ban to unban
         unbanned_by_id: ID of user performing the unban
         course_id: Optional course ID for org-level ban exceptions
         reason: Reason for unbanning
-        
+
     Returns:
         dict: Response with status, message, and ban/exception data
-        
+
     Raises:
         DiscussionBan.DoesNotExist: If ban not found
         User.DoesNotExist: If unbanned_by user not found
@@ -199,7 +199,10 @@ def unban_user(
                 'created_at': exception.created.isoformat() if hasattr(exception, 'created') else None,
             }
 
-            message = f'User {ban.user.username} unbanned from {course_id} (org-level ban still active for other courses)'
+            message = (
+                f'User {ban.user.username} unbanned from {course_id} '
+                f'(org-level ban still active for other courses)'
+            )
 
             # Audit log for exception
             ModerationAuditLog.objects.create(
@@ -279,12 +282,12 @@ def get_banned_users(
 ) -> List[Dict[str, Any]]:
     """
     Get list of banned users.
-    
+
     Args:
         course_id: Filter by course ID (includes org-level bans for that course's org)
         org_key: Filter by organization key
         include_inactive: Include inactive (unbanned) users
-        
+
     Returns:
         list: List of ban records
     """
@@ -297,7 +300,8 @@ def get_banned_users(
         course_key = CourseKey.from_string(course_id)
         # Include both course-level bans and org-level bans for this course's org
         try:
-            from openedx.core.djangoapps.content.course_overviews.models import CourseOverview  # pylint: disable=import-error,import-outside-toplevel
+            # pylint: disable=import-error,import-outside-toplevel
+            from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
             course = CourseOverview.objects.get(id=course_key)
             queryset = queryset.filter(
                 models.Q(course_id=course_key) | models.Q(org_key=course.org)
@@ -316,13 +320,13 @@ def get_banned_users(
 def get_ban(ban_id: int) -> Dict[str, Any]:
     """
     Get a specific ban by ID.
-    
+
     Args:
         ban_id: ID of the ban
-        
+
     Returns:
         dict: Ban record data
-        
+
     Raises:
         DiscussionBan.DoesNotExist: If ban not found
     """
@@ -333,10 +337,10 @@ def get_ban(ban_id: int) -> Dict[str, Any]:
 def _serialize_ban(ban: DiscussionBan) -> Dict[str, Any]:
     """
     Serialize a ban object to dictionary.
-    
+
     Args:
         ban: DiscussionBan instance
-        
+
     Returns:
         dict: Serialized ban data
     """
