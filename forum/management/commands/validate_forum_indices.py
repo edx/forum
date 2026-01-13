@@ -12,7 +12,7 @@ class Command(BaseCommand):
 
     help = "Validate Elasticsearch indices for correct mappings and properties."
 
-    def handle(self, *args: list[str], **kwargs: dict[str, str]) -> None:
+    def handle(self, *_args: list[str], **_kwargs: dict[str, str]) -> None:
         """
         Handles the execution of the validate_forum_indices command.
 

@@ -23,7 +23,7 @@ class Command(BaseCommand):
             help="Perform a dry run without actually deleting data",
         )
 
-    def handle(self, *args: str, **options: dict[str, Any]) -> None:
+    def handle(self, *_args: str, **options: dict[str, Any]) -> None:
         """Handle method for command."""
         db = get_database()
 

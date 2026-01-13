@@ -14,7 +14,7 @@ class Command(BaseCommand):
         "Delete all Elasticsearch indices that are not the latest for each model type."
     )
 
-    def handle(self, *args: list[str], **kwargs: dict[str, str]) -> None:
+    def handle(self, *_args: list[str], **_kwargs: dict[str, str]) -> None:
         """
         Handles the execution of the delete_unused_forum_indices command.
 

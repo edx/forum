@@ -34,6 +34,36 @@ class MongoBaseModel(ABC):
             cls.MONGODB_DATABASE = get_database()
         return cls.MONGODB_DATABASE
 
+    @staticmethod
+    def _serialize_objectid(doc: dict[str, Any]) -> dict[str, Any]:
+        """
+        Convert ObjectId fields to strings for JSON serialization.
+
+        Args:
+            doc: MongoDB document
+
+        Returns:
+            Document with serialized ObjectIds
+        """
+        if "_id" in doc and isinstance(doc["_id"], ObjectId):
+            doc["_id"] = str(doc["_id"])
+        return doc
+
+    @classmethod
+    def _serialize_objectids_in_list(
+        cls, docs: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """
+        Convert ObjectId fields to strings in a list of documents.
+
+        Args:
+            docs: List of MongoDB documents
+
+        Returns:
+            List of documents with serialized ObjectIds
+        """
+        return [cls._serialize_objectid(doc.copy()) for doc in docs]
+
     def override_query(self, query: dict[str, Any]) -> dict[str, Any]:
         """Override Query"""
         return query

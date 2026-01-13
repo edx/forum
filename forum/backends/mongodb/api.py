@@ -4,7 +4,8 @@ import math
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from bson import ObjectId, errors as bson_errors
+from bson import ObjectId
+from bson import errors as bson_errors
 from django.core.exceptions import ObjectDoesNotExist
 
 from forum.backends.backend import AbstractBackend
@@ -15,6 +16,7 @@ from forum.backends.mongodb import (
     Subscriptions,
     Users,
 )
+from forum.backends.mongodb.mutes import DiscussionModerationLogs, DiscussionMutes
 from forum.constants import RETIRED_BODY, RETIRED_TITLE
 from forum.utils import (
     ForumV2RequestError,
@@ -1714,7 +1716,6 @@ class MongoBackend(AbstractBackend):
         ]
         return pipeline
 
-    # pylint: disable=E1121
     @classmethod
     def get_paginated_user_stats(
         cls, course_id: str, page: int, per_page: int, sort_criterion: dict[str, Any]
@@ -1811,3 +1812,336 @@ class MongoBackend(AbstractBackend):
             return 0
 
         return model.update(content_id, is_spam=False)
+
+    # Mute/Unmute Methods for MongoDB Backend
+    @classmethod
+    def mute_user(
+        cls,
+        muted_user_id: str,
+        muted_by_id: str,
+        course_id: str,
+        scope: str = "personal",
+        reason: str = "",
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        Mute a user using MongoDB backend.
+
+        Args:
+            muted_user_id: ID of user to mute
+            muted_by_id: ID of user performing the mute
+            course_id: Course identifier
+            scope: Mute scope ('personal' or 'course')
+            reason: Optional reason for mute
+
+        Returns:
+            Dictionary containing mute record data
+        """
+        try:
+            mutes = DiscussionMutes()
+            logs = DiscussionModerationLogs()
+
+            # Create the mute record
+            mute_doc = mutes.create_mute(
+                muted_user_id=muted_user_id,
+                muted_by_id=muted_by_id,
+                course_id=course_id,
+                scope=scope,
+                reason=reason,
+            )
+
+            # Log the action
+            logs.log_action(
+                action_type="mute",
+                target_user_id=muted_user_id,
+                moderator_id=muted_by_id,
+                course_id=course_id,
+                scope=scope,
+                reason=reason,
+                metadata={"backend": "mongodb"},
+            )
+
+            return mute_doc
+
+        except ValueError as e:
+            raise ForumV2RequestError(str(e)) from e
+        except Exception as e:
+            raise ForumV2RequestError(f"Failed to mute user: {str(e)}") from e
+
+    @classmethod
+    def unmute_user(
+        cls,
+        muted_user_id: str,
+        unmuted_by_id: str,
+        course_id: str,
+        scope: str = "personal",
+        muted_by_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        Unmute a user using MongoDB backend.
+
+        Args:
+            muted_user_id: ID of user to unmute
+            unmuted_by_id: ID of user performing the unmute
+            course_id: Course identifier
+            scope: Unmute scope ('personal' or 'course')
+            muted_by_id: Original muter ID (for personal unmutes)
+
+        Returns:
+            Dictionary containing unmute result
+        """
+        try:
+            mutes = DiscussionMutes()
+            logs = DiscussionModerationLogs()
+
+            # Deactivate the mute
+            result = mutes.deactivate_mutes(
+                muted_user_id=muted_user_id,
+                unmuted_by_id=unmuted_by_id,
+                course_id=course_id,
+                scope=scope,
+                muted_by_id=muted_by_id,
+            )
+
+            # Log the action
+            logs.log_action(
+                action_type="unmute",
+                target_user_id=muted_user_id,
+                moderator_id=unmuted_by_id,
+                course_id=course_id,
+                scope=scope,
+                metadata={"backend": "mongodb"},
+            )
+
+            return result
+
+        except ValueError as e:
+            raise ForumV2RequestError(str(e)) from e
+        except Exception as e:
+            raise ForumV2RequestError(f"Failed to unmute user: {str(e)}") from e
+
+    @classmethod
+    def mute_and_report_user(
+        cls,
+        muted_user_id: str,
+        muted_by_id: str,
+        course_id: str,
+        scope: str = "personal",
+        reason: str = "",
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        Mute a user and create a moderation report using MongoDB backend.
+
+        Args:
+            muted_user_id: ID of user to mute and report
+            muted_by_id: ID of user performing the action
+            course_id: Course identifier
+            scope: Mute scope ('personal' or 'course')
+            reason: Reason for muting and reporting
+
+        Returns:
+            Dictionary containing mute and report data
+        """
+        try:
+            # First mute the user
+            mute_result = cls.mute_user(
+                muted_user_id=muted_user_id,
+                muted_by_id=muted_by_id,
+                course_id=course_id,
+                scope=scope,
+                reason=reason,
+            )
+
+            # Log the mute_and_report action
+            logs = DiscussionModerationLogs()
+            logs.log_action(
+                action_type="mute_and_report",
+                target_user_id=muted_user_id,
+                moderator_id=muted_by_id,
+                course_id=course_id,
+                scope=scope,
+                reason=reason,
+                metadata={
+                    "backend": "mongodb",
+                    "reported": True,
+                    "mute_id": str(mute_result.get("_id")),
+                },
+            )
+
+            # Add reporting flag to indicate this was also reported
+            mute_result["reported"] = True
+            mute_result["action"] = "mute_and_report"
+
+            return mute_result
+
+        except Exception as e:
+            raise ForumV2RequestError(
+                f"Failed to mute and report user: {str(e)}"
+            ) from e
+
+    @classmethod
+    def get_user_mute_status(
+        cls,
+        muted_user_id: str,
+        course_id: str,
+        requesting_user_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        Get mute status for a user using MongoDB backend.
+
+        Args:
+            muted_user_id: ID of user to check
+            course_id: Course identifier
+            requesting_user_id: ID of user requesting the status
+
+        Returns:
+            Dictionary containing mute status information
+        """
+        try:
+            mutes = DiscussionMutes()
+            return mutes.get_user_mute_status(
+                user_id=muted_user_id,
+                course_id=course_id,
+                viewer_id=requesting_user_id or "",  # Handle None case
+            )
+
+        except Exception as e:
+            raise ForumV2RequestError(f"Failed to get mute status: {str(e)}") from e
+
+    @classmethod
+    def get_all_muted_users_for_course(
+        cls,
+        course_id: str,
+        requester_id: Optional[str] = None,
+        scope: str = "all",
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        Get all muted users in a course using MongoDB backend.
+
+        Args:
+            course_id: Course identifier
+            requester_id: ID of user requesting the list
+            scope: Scope filter ('personal', 'course', or 'all')
+
+        Returns:
+            Dictionary containing list of muted users
+        """
+        try:
+            mutes = DiscussionMutes()
+            muted_users = mutes.get_all_muted_users_for_course(
+                course_id=course_id, requester_id=requester_id, scope=scope
+            )
+
+            return {
+                "course_id": course_id,
+                "scope": scope,
+                "muted_users": muted_users,
+                "total_count": len(muted_users),
+                "backend": "mongodb",
+            }
+
+        except Exception as e:
+            raise ForumV2RequestError(f"Failed to get muted users: {str(e)}") from e
+
+    @classmethod
+    def get_muted_users(
+        cls,
+        moderator_id: str,
+        course_id: str,
+        scope: str = "personal",
+        active_only: bool = True,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        """
+        Get list of users muted by a moderator using MongoDB backend.
+
+        Args:
+            moderator_id: ID of the moderator
+            course_id: Course identifier
+            scope: Mute scope filter
+            active_only: Whether to return only active mutes
+
+        Returns:
+            List of muted user records
+        """
+        try:
+            # MongoDB implementation placeholder
+            return []
+        except Exception as e:
+            raise ForumV2RequestError(f"Failed to get muted users: {str(e)}") from e
+
+    @classmethod
+    def create_mute_exception(
+        cls, muted_user_id: str, exception_user_id: str, course_id: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        Create a mute exception for course-wide mutes using MongoDB backend.
+
+        Args:
+            muted_user_id: ID of the muted user
+            exception_user_id: ID of user creating exception
+            course_id: Course identifier
+
+        Returns:
+            Dictionary containing exception data
+        """
+        try:
+            # MongoDB implementation placeholder
+            return {
+                "muted_user_id": muted_user_id,
+                "exception_user_id": exception_user_id,
+                "course_id": course_id,
+                "backend": "mongodb",
+            }
+        except Exception as e:
+            raise ForumV2RequestError(
+                f"Failed to create mute exception: {str(e)}"
+            ) from e
+
+    @classmethod
+    def log_moderation_action(
+        cls,
+        action_type: str,
+        target_user_id: str,
+        moderator_id: str,
+        course_id: str,
+        scope: str = "personal",
+        reason: str = "",
+        metadata: Optional[dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        Log a moderation action using MongoDB backend.
+
+        Args:
+            action_type: Type of action (mute, unmute, mute_and_report)
+            target_user_id: ID of the target user
+            moderator_id: ID of the moderating user
+            course_id: Course identifier
+            scope: Action scope
+            reason: Optional reason
+            metadata: Additional action metadata
+
+        Returns:
+            Dictionary containing log entry data
+        """
+        try:
+            # MongoDB implementation placeholder
+            return {
+                "action_type": action_type,
+                "target_user_id": target_user_id,
+                "moderator_id": moderator_id,
+                "course_id": course_id,
+                "scope": scope,
+                "reason": reason,
+                "metadata": metadata or {},
+                "backend": "mongodb",
+            }
+        except Exception as e:
+            raise ForumV2RequestError(
+                f"Failed to log moderation action: {str(e)}"
+            ) from e

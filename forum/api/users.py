@@ -21,9 +21,9 @@ def get_user(
     course_id: Optional[str] = None,
     complete: Optional[bool] = False,
 ) -> dict[str, Any]:
-    """Get user data by user_id."""
     """
     Get users data by user_id.
+
     Parameters:
         user_id (str): The ID of the requested User.
         params (str): attributes for user's data filteration.

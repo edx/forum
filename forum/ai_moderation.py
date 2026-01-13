@@ -4,7 +4,7 @@ AI Moderation utilities for forum content.
 
 import json
 import logging
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
 import requests
 from django.conf import settings
@@ -216,9 +216,7 @@ class AIModerationService:
         }
         # Check if AI moderation is enabled
         # pylint: disable=import-outside-toplevel
-        from forum.toggles import (
-            is_ai_moderation_enabled,
-        )
+        from forum.toggles import is_ai_moderation_enabled
 
         course_key = CourseKey.from_string(course_id) if course_id else None
         if not is_ai_moderation_enabled(course_key):  # type: ignore[no-untyped-call]

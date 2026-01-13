@@ -10,12 +10,12 @@ import pytest
 from pymongo import MongoClient
 from pymongo.database import Database
 
-from forum.backends.mysql.api import MySQLBackend
 from forum.backends.mongodb.api import MongoBackend
+from forum.backends.mysql.api import MySQLBackend
 from test_utils.client import APIClient
 from test_utils.mock_es_backend import (
-    MockElasticsearchIndexBackend,
     MockElasticsearchDocumentBackend,
+    MockElasticsearchIndexBackend,
 )
 
 

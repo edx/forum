@@ -1,6 +1,7 @@
 """Test flags api endpoints."""
 
 from typing import Any
+
 import pytest
 
 from test_utils.client import APIClient

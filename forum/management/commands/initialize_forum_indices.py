@@ -28,7 +28,7 @@ class Command(BaseCommand):
             help="Force the creation of new indices even if they exist.",
         )
 
-    def handle(self, *args: list[str], **kwargs: dict[str, Any]) -> None:
+    def handle(self, *_args: list[str], **kwargs: dict[str, Any]) -> None:
         """
         Handles the execution of the initialize_indices command.
 

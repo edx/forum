@@ -4,12 +4,13 @@ Handlers for the forum app.
 
 import logging
 from typing import Any
-from django.db.models.signals import post_save, post_delete
+
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
+from forum.models import Comment, CommentThread
 from forum.search import get_document_search_backend
 from forum.utils import get_str_value_from_collection
-from forum.models import Comment, CommentThread
 
 log = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ def handle_comment_updated(sender: Any, **kwargs: dict[str, Any]) -> None:
 
 @receiver(post_delete, sender=CommentThread)
 @receiver(post_delete, sender=Comment)
-def handle_deletion(sender: Any, instance: Any, **kwargs: dict[str, Any]) -> None:
+def handle_deletion(sender: Any, instance: Any, **_kwargs: dict[str, Any]) -> None:
     """
     Handle the deletion of a comment thread or comment from the MySQL database.
 
@@ -119,7 +120,7 @@ def handle_deletion(sender: Any, instance: Any, **kwargs: dict[str, Any]) -> Non
 @receiver(post_save, sender=CommentThread)
 @receiver(post_save, sender=Comment)
 def handle_comment_thread_and_comment(
-    sender: Any, instance: Any, created: bool, **kwargs: dict[str, Any]
+    sender: Any, instance: Any, created: bool, **_kwargs: dict[str, Any]
 ) -> None:
     """
     Handle the insertion or update of a comment thread or comment in the MySQL database.
