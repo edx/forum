@@ -63,6 +63,9 @@ class CourseStat(models.Model):
     threads: models.IntegerField[int, int] = models.IntegerField(default=0)
     responses: models.IntegerField[int, int] = models.IntegerField(default=0)
     replies: models.IntegerField[int, int] = models.IntegerField(default=0)
+    deleted_threads: models.IntegerField[int, int] = models.IntegerField(default=0)
+    deleted_responses: models.IntegerField[int, int] = models.IntegerField(default=0)
+    deleted_replies: models.IntegerField[int, int] = models.IntegerField(default=0)
     last_activity_at: models.DateTimeField[Optional[datetime], datetime] = (
         models.DateTimeField(default=None, null=True, blank=True)
     )
@@ -79,6 +82,12 @@ class CourseStat(models.Model):
             "threads": self.threads,
             "responses": self.responses,
             "replies": self.replies,
+            "deleted_threads": self.deleted_threads,
+            "deleted_responses": self.deleted_responses,
+            "deleted_replies": self.deleted_replies,
+            "deleted_count": self.deleted_threads
+            + self.deleted_responses
+            + self.deleted_replies,
             "course_id": self.course_id,
             "last_activity_at": self.last_activity_at,
         }
@@ -128,6 +137,25 @@ class Content(models.Model):
     is_spam: models.BooleanField[bool, bool] = models.BooleanField(
         default=False,
         help_text="Whether this content has been identified as spam by AI moderation",
+    )
+    is_deleted: models.BooleanField[bool, bool] = models.BooleanField(
+        default=False,
+        help_text="Whether this content has been soft deleted",
+    )
+    deleted_at: models.DateTimeField[Optional[datetime], datetime] = (
+        models.DateTimeField(
+            null=True,
+            blank=True,
+            help_text="When this content was soft deleted",
+        )
+    )
+    deleted_by: models.ForeignKey[User, User] = models.ForeignKey(
+        User,
+        related_name="deleted_%(class)s",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        help_text="User who soft deleted this content",
     )
     uservote = GenericRelation(
         "UserVote",
@@ -267,8 +295,8 @@ class CommentThread(Content):
 
     @property
     def comment_count(self) -> int:
-        """Return the number of comments in the thread."""
-        return Comment.objects.filter(comment_thread=self).count()
+        """Return the number of comments in the thread (excluding deleted)."""
+        return Comment.objects.filter(comment_thread=self, is_deleted=False).count()
 
     @classmethod
     def get(cls, thread_id: str) -> CommentThread:
@@ -323,6 +351,9 @@ class CommentThread(Content):
             "edit_history": edit_history,
             "group_id": self.group_id,
             "is_spam": self.is_spam,
+            "is_deleted": self.is_deleted,
+            "deleted_at": self.deleted_at,
+            "deleted_by": str(self.deleted_by.pk) if self.deleted_by else None,
         }
 
     def doc_to_hash(self) -> dict[str, Any]:
@@ -509,6 +540,9 @@ class Comment(Content):
             "created_at": self.created_at,
             "endorsement": endorsement if self.endorsement else None,
             "is_spam": self.is_spam,
+            "is_deleted": self.is_deleted,
+            "deleted_at": self.deleted_at,
+            "deleted_by": str(self.deleted_by.pk) if self.deleted_by else None,
         }
         if edit_history:
             data["edit_history"] = edit_history
