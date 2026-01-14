@@ -220,12 +220,16 @@ def update_comment(
         raise error
 
 
-def delete_comment(comment_id: str, course_id: Optional[str] = None) -> dict[str, Any]:
+def delete_comment(
+    comment_id: str, course_id: Optional[str] = None, deleted_by: Optional[str] = None
+) -> dict[str, Any]:
     """
     Delete a comment.
 
     Parameters:
         comment_id: The ID of the comment to be deleted.
+        course_id: The ID of the course (optional).
+        deleted_by: The ID of the user performing the delete (optional).
     Body:
         Empty.
     Response:
@@ -244,14 +248,33 @@ def delete_comment(comment_id: str, course_id: Optional[str] = None) -> dict[str
         backend,
         exclude_fields=["endorsement", "sk"],
     )
-    backend.delete_comment(comment_id)
     author_id = comment["author_id"]
     comment_course_id = comment["course_id"]
-    parent_comment_id = data["parent_id"]
-    if parent_comment_id:
-        backend.update_stats_for_course(author_id, comment_course_id, replies=-1)
+
+    # soft_delete_comment returns (responses_deleted, replies_deleted)
+    responses_deleted, replies_deleted = backend.soft_delete_comment(
+        comment_id, deleted_by
+    )
+
+    # Update stats based on what was actually deleted
+    if responses_deleted > 0:
+        # A response (parent comment) was deleted
+        backend.update_stats_for_course(
+            author_id,
+            comment_course_id,
+            responses=-responses_deleted,
+            deleted_responses=responses_deleted,
+            replies=-replies_deleted,
+            deleted_replies=replies_deleted,
+        )
     else:
-        backend.update_stats_for_course(author_id, comment_course_id, responses=-1)
+        # Only a reply was deleted (no response)
+        backend.update_stats_for_course(
+            author_id,
+            comment_course_id,
+            replies=-replies_deleted,
+            deleted_replies=replies_deleted,
+        )
     return data
 
 
@@ -388,3 +411,64 @@ def get_user_comments(
         "num_pages": num_pages,
         "page": page,
     }
+
+
+def get_deleted_comments_for_course(
+    course_id: str, page: int = 1, per_page: int = 20, author_id: Optional[str] = None
+) -> dict[str, Any]:
+    """
+    Get deleted comments for a specific course.
+
+    Args:
+        course_id (str): The course identifier
+        page (int): Page number for pagination (default: 1)
+        per_page (int): Number of comments per page (default: 20)
+        author_id (str, optional): Filter by author ID
+
+    Returns:
+        dict: Dictionary containing deleted comments and pagination info
+    """
+    backend = get_backend(course_id)()
+    return backend.get_deleted_comments_for_course(course_id, page, per_page, author_id)
+
+
+def restore_comment(
+    comment_id: str, course_id: Optional[str] = None, restored_by: Optional[str] = None
+) -> bool:
+    """
+    Restore a soft-deleted comment.
+
+    Args:
+        comment_id (str): The ID of the comment to restore
+        course_id (str, optional): The course ID for backend selection
+        restored_by (str, optional): The ID of the user performing the restoration
+
+    Returns:
+        bool: True if comment was restored, False if not found
+    """
+    backend = get_backend(course_id)()
+    return backend.restore_comment(comment_id, restored_by=restored_by)
+
+
+def restore_user_deleted_comments(
+    user_id: str,
+    course_ids: list[str],
+    course_id: Optional[str] = None,
+    restored_by: Optional[str] = None,
+) -> int:
+    """
+    Restore all deleted comments for a user across courses.
+
+    Args:
+        user_id (str): The ID of the user whose comments to restore
+        course_ids (list): List of course IDs to restore comments in
+        course_id (str, optional): Course ID for backend selection (uses first from list if not provided)
+        restored_by (str, optional): The ID of the user performing the restoration
+
+    Returns:
+        int: Number of comments restored
+    """
+    backend = get_backend(course_id or course_ids[0])()
+    return backend.restore_user_deleted_comments(
+        user_id, course_ids, restored_by=restored_by
+    )

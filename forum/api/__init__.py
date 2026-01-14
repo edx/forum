@@ -8,14 +8,14 @@ from .comments import (
     create_parent_comment,
     delete_comment,
     get_course_id_by_comment,
+    get_deleted_comments_for_course,
     get_parent_comment,
     get_user_comments,
+    restore_comment,
+    restore_user_deleted_comments,
     update_comment,
 )
-from .flags import (
-    update_comment_flag,
-    update_thread_flag,
-)
+from .flags import update_comment_flag, update_thread_flag
 from .pins import pin_thread, unpin_thread
 from .search import search_threads
 from .subscriptions import (
@@ -28,8 +28,11 @@ from .threads import (
     create_thread,
     delete_thread,
     get_course_id_by_thread,
+    get_deleted_threads_for_course,
     get_thread,
     get_user_threads,
+    restore_thread,
+    restore_user_deleted_threads,
     update_thread,
 )
 from .users import (
@@ -73,6 +76,8 @@ __all__ = [
     "get_user_course_stats",
     "get_user_subscriptions",
     "get_user_threads",
+    "get_deleted_comments_for_course",
+    "get_deleted_threads_for_course",
     "mark_thread_as_read",
     "pin_thread",
     "retire_user",
