@@ -9,7 +9,13 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from forum.api.threads import create_thread, delete_thread, get_thread, get_user_threads, update_thread
+from forum.api.threads import (
+    create_thread,
+    delete_thread,
+    get_thread,
+    get_user_threads,
+    update_thread,
+)
 from forum.utils import ForumV2RequestError, str_to_bool
 
 log = logging.getLogger(__name__)

@@ -17,7 +17,13 @@ from forum.backends.mongodb.subscriptions import Subscriptions
 from forum.backends.mongodb.threads import CommentThread
 from forum.backends.mongodb.users import Users
 from forum.constants import RETIRED_BODY, RETIRED_TITLE
-from forum.utils import ForumV2RequestError, get_group_ids_from_params, get_sort_criteria, make_aware, str_to_bool
+from forum.utils import (
+    ForumV2RequestError,
+    get_group_ids_from_params,
+    get_sort_criteria,
+    make_aware,
+    str_to_bool,
+)
 
 
 class MongoBackend(AbstractBackend):

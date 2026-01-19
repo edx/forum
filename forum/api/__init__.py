@@ -26,7 +26,12 @@ from .mutes import (
 )
 from .pins import pin_thread, unpin_thread
 from .search import search_threads
-from .subscriptions import create_subscription, delete_subscription, get_thread_subscriptions, get_user_subscriptions
+from .subscriptions import (
+    create_subscription,
+    delete_subscription,
+    get_thread_subscriptions,
+    get_user_subscriptions,
+)
 from .threads import (
     create_thread,
     delete_thread,
@@ -49,7 +54,12 @@ from .users import (
     update_username,
     update_users_in_course,
 )
-from .votes import delete_comment_vote, delete_thread_vote, update_comment_votes, update_thread_votes
+from .votes import (
+    delete_comment_vote,
+    delete_thread_vote,
+    update_comment_votes,
+    update_thread_votes,
+)
 
 __all__ = [
     "create_child_comment",
