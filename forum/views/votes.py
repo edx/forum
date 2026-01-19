@@ -7,12 +7,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from forum.api.votes import (
-    delete_comment_vote,
-    delete_thread_vote,
-    update_comment_votes,
-    update_thread_votes,
-)
+from forum.api.votes import delete_comment_vote, delete_thread_vote, update_comment_votes, update_thread_votes
 from forum.utils import ForumV2RequestError
 
 

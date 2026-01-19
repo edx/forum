@@ -476,8 +476,7 @@ class AbstractBackend:
         Retrieve all threads and comments authored by a specific user.
         """
         raise NotImplementedError
-
-<<<<<<< HEAD
+        
     # Mute/Unmute functionality
     @classmethod
     def mute_user(
@@ -665,9 +664,6 @@ class AbstractBackend:
         """
         raise NotImplementedError
 
-=======
-<<<<<<< HEAD
->>>>>>> dc1a77a (feat: implement mute/unmute feature)
     @staticmethod
     def get_deleted_threads_for_course(
         course_id: str,
@@ -689,8 +685,11 @@ class AbstractBackend:
     ) -> dict[str, Any]:
         """
         Get deleted comments for a specific course.
-=======
+        """
+        raise NotImplementedError
+
     # Mute/Unmute functionality
+
     @classmethod
     def mute_user(
         cls,
@@ -874,6 +873,5 @@ class AbstractBackend:
 
         Returns:
             Dictionary containing list of muted users
->>>>>>> b31fe4d (feat: implement mute/unmute feature)
         """
         raise NotImplementedError

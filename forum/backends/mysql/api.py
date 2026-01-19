@@ -9,19 +9,7 @@ from django.contrib.auth.models import User  # pylint: disable=E5142
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.paginator import Paginator
-from django.db.models import (
-    Case,
-    Count,
-    Exists,
-    F,
-    IntegerField,
-    Max,
-    OuterRef,
-    Q,
-    Subquery,
-    Sum,
-    When,
-)
+from django.db.models import Case, Count, Exists, F, IntegerField, Max, OuterRef, Q, Subquery, Sum, When
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -2514,8 +2502,6 @@ class MySQLBackend(AbstractBackend):
         else:
             return cls.update_comment(content_id, **update_data)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
     # Mute/Unmute Methods for MySQL Backend
     @classmethod
     def mute_user(
@@ -2834,9 +2820,7 @@ class MySQLBackend(AbstractBackend):
         }
         # For now, just return the log entry data
         return log_entry
-=======
-=======
->>>>>>> dc1a77a (feat: implement mute/unmute feature)
+
     @staticmethod
     def get_deleted_threads_for_course(
         course_id: str,
@@ -2890,11 +2874,7 @@ class MySQLBackend(AbstractBackend):
             "page": page,
             "per_page": per_page,
         }
-<<<<<<< HEAD
->>>>>>> 9d492b4 (feat: added soft delete functionality (#10))
-=======
-=======
-    # Mute/Unmute Methods for MySQL Backend
+
     @classmethod
     def mute_user(
         cls,
@@ -3212,5 +3192,8 @@ class MySQLBackend(AbstractBackend):
         }
         # For now, just return the log entry data
         return log_entry
+<<<<<<< HEAD
 >>>>>>> b31fe4d (feat: implement mute/unmute feature)
 >>>>>>> dc1a77a (feat: implement mute/unmute feature)
+=======
+>>>>>>> 82a403f (feat: implement mute/unmute feature)

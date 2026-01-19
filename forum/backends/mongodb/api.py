@@ -10,6 +10,7 @@ from bson import errors as bson_errors
 from django.core.exceptions import ObjectDoesNotExist
 
 from forum.backends.backend import AbstractBackend
+<<<<<<< HEAD
 from forum.backends.mongodb import (
     Comment,
     CommentThread,
@@ -17,15 +18,12 @@ from forum.backends.mongodb import (
     Subscriptions,
     Users,
 )
+=======
+from forum.backends.mongodb import Comment, CommentThread, Contents, Subscriptions, Users
+>>>>>>> 82a403f (feat: implement mute/unmute feature)
 from forum.backends.mongodb.mutes import DiscussionModerationLogs, DiscussionMutes
 from forum.constants import RETIRED_BODY, RETIRED_TITLE
-from forum.utils import (
-    ForumV2RequestError,
-    get_group_ids_from_params,
-    get_sort_criteria,
-    make_aware,
-    str_to_bool,
-)
+from forum.utils import ForumV2RequestError, get_group_ids_from_params, get_sort_criteria, make_aware, str_to_bool
 
 
 class MongoBackend(AbstractBackend):

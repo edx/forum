@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from bson import ObjectId
 
+from forum.backends.mongodb.api import MongoBackend
 from forum.backends.mongodb.contents import BaseContents
 from forum.backends.mongodb.users import Users
 from forum.utils import get_handler_by_name
@@ -356,9 +357,6 @@ class CommentThread(BaseContents):
 
                 # Check if thread is anonymous
                 if not (thread.get("anonymous") or thread.get("anonymous_to_peers")):
-                    from forum.backends.mongodb.api import (  # pylint: disable=import-outside-toplevel
-                        MongoBackend,
-                    )
 
                     # Increment threads count and decrement deleted_threads count in user stats
                     MongoBackend.update_stats_for_course(

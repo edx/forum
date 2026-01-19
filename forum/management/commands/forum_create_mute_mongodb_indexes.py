@@ -9,11 +9,7 @@ from django.core.management.base import BaseCommand
 from pymongo import MongoClient
 from pymongo.errors import OperationFailure
 
-from forum.backends.mongodb.mutes import (
-    DiscussionModerationLogs,
-    DiscussionMuteExceptions,
-    DiscussionMutes,
-)
+from forum.backends.mongodb.mutes import DiscussionModerationLogs, DiscussionMuteExceptions, DiscussionMutes
 
 
 class Command(BaseCommand):

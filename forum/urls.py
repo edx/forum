@@ -9,11 +9,7 @@ from forum.views.comments import CommentsAPIView, CreateThreadCommentAPIView
 from forum.views.flags import CommentFlagAPIView, ThreadFlagAPIView
 from forum.views.pins import PinThreadAPIView, UnpinThreadAPIView
 from forum.views.search import SearchThreadsView
-from forum.views.subscriptions import (
-    SubscriptionAPIView,
-    ThreadSubscriptionAPIView,
-    UserSubscriptionAPIView,
-)
+from forum.views.subscriptions import SubscriptionAPIView, ThreadSubscriptionAPIView, UserSubscriptionAPIView
 from forum.views.threads import CreateThreadAPIView, ThreadsAPIView, UserThreadsAPIView
 from forum.views.users import (
     UserActiveThreadsAPIView,
