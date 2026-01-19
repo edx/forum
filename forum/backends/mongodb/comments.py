@@ -5,7 +5,6 @@ from typing import Any, Optional
 
 from bson import ObjectId
 
-from forum.backends.mongodb.api import MongoBackend
 from forum.backends.mongodb.contents import BaseContents
 from forum.backends.mongodb.threads import CommentThread
 from forum.backends.mongodb.users import Users
@@ -489,6 +488,8 @@ class Comment(BaseContents):
 
                 # Check if comment is anonymous
                 if not (comment.get("anonymous") or comment.get("anonymous_to_peers")):
+
+                    from forum.backends.mongodb.api import MongoBackend  # pylint: disable=import-outside-toplevel
 
                     if parent_comment_id:
                         # This is a reply - increment replies count and decrement deleted_replies

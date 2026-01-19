@@ -10,8 +10,12 @@ from bson import errors as bson_errors
 from django.core.exceptions import ObjectDoesNotExist
 
 from forum.backends.backend import AbstractBackend
-from forum.backends.mongodb import Comment, CommentThread, Contents, Subscriptions, Users
+from forum.backends.mongodb.comments import Comment
+from forum.backends.mongodb.contents import Contents
 from forum.backends.mongodb.mutes import DiscussionModerationLogs, DiscussionMutes
+from forum.backends.mongodb.subscriptions import Subscriptions
+from forum.backends.mongodb.threads import CommentThread
+from forum.backends.mongodb.users import Users
 from forum.constants import RETIRED_BODY, RETIRED_TITLE
 from forum.utils import ForumV2RequestError, get_group_ids_from_params, get_sort_criteria, make_aware, str_to_bool
 
