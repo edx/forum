@@ -356,9 +356,9 @@ class CommentThread(BaseContents):
 
                 # Check if thread is anonymous
                 if not (thread.get("anonymous") or thread.get("anonymous_to_peers")):
-                    from forum.backends.mongodb.api import (  # pylint: disable=import-outside-toplevel
-                        MongoBackend,
-                    )
+
+                    # pylint: disable=import-outside-toplevel
+                    from forum.backends.mongodb.api import MongoBackend
 
                     # Increment threads count and decrement deleted_threads count in user stats
                     MongoBackend.update_stats_for_course(

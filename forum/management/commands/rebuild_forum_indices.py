@@ -35,7 +35,7 @@ class Command(BaseCommand):
             help="Extra minutes to adjust the start time for catch-up.",
         )
 
-    def handle(self, *args: list[str], **kwargs: dict[str, int]) -> None:
+    def handle(self, *_args: list[str], **kwargs: dict[str, int]) -> None:
         """
         Handles the execution of the rebuild_indices command.
 

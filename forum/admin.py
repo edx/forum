@@ -1,20 +1,23 @@
 """Admin module for forum."""
 
 from django.contrib import admin
+
 from forum.models import (
-    ForumUser,
-    CourseStat,
-    CommentThread,
-    Comment,
-    EditHistory,
     AbuseFlagger,
+    Comment,
+    CommentThread,
+    CourseStat,
+    DiscussionMute,
+    DiscussionMuteException,
+    EditHistory,
+    ForumUser,
     HistoricalAbuseFlagger,
-    ReadState,
     LastReadTime,
-    UserVote,
-    Subscription,
-    MongoContent,
     ModerationAuditLog,
+    MongoContent,
+    ReadState,
+    Subscription,
+    UserVote,
 )
 
 
@@ -147,6 +150,38 @@ class SubscriptionAdmin(admin.ModelAdmin):  # type: ignore
     )
     search_fields = ("subscriber__username",)
     list_filter = ("source_content_type",)
+
+
+@admin.register(DiscussionMute)
+class DiscussionMuteAdmin(admin.ModelAdmin):  # type: ignore
+    """Admin interface for DiscussionMute model."""
+
+    list_display = (
+        "muted_user",
+        "muted_by",
+        "course_id",
+        "scope",
+        "reason",
+        "is_active",
+        "created",
+        "modified",
+    )
+    search_fields = (
+        "muted_user__username",
+        "muted_by__username",
+        "reason",
+        "course_id",
+    )
+    list_filter = ("scope", "is_active", "created", "modified")
+
+
+@admin.register(DiscussionMuteException)
+class DiscussionMuteExceptionAdmin(admin.ModelAdmin):  # type: ignore
+    """Admin interface for DiscussionMuteException model."""
+
+    list_display = ("muted_user", "exception_user", "course_id", "created")
+    search_fields = ("muted_user__username", "exception_user__username", "course_id")
+    list_filter = ("created",)
 
 
 @admin.register(MongoContent)

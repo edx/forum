@@ -1,7 +1,7 @@
 """Migration commands helper methods."""
 
-from typing import Any
 import logging
+from typing import Any
 
 from django.contrib.auth.models import User  # pylint: disable=E5142
 from django.core.management.base import OutputWrapper
@@ -23,8 +23,7 @@ from forum.models import (
     Subscription,
     UserVote,
 )
-from forum.utils import make_aware, get_trunc_title
-
+from forum.utils import get_trunc_title, make_aware
 
 logger = logging.getLogger(__name__)
 
@@ -462,7 +461,6 @@ def log_deletion(
 def enable_mysql_backend_for_course(course_id: str) -> None:
     """Enable MySQL backend waffle flag for a course."""
     from opaque_keys.edx.keys import CourseKey
-
     from openedx.core.djangoapps.waffle_utils.models import (  # type: ignore[import-not-found]
         WaffleFlagCourseOverrideModel,
     )

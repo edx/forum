@@ -12,7 +12,7 @@ class Command(BaseCommand):
 
     help = "Create or Update indexes in the mongodb for the content model"
 
-    def handle(self, *args: list[str], **kwargs: dict[str, str]) -> None:
+    def handle(self, *_args: list[str], **_kwargs: dict[str, str]) -> None:
         """
         Handles the execution of the forum_create_mongodb_indexes command.
 

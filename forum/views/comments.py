@@ -24,7 +24,7 @@ class CommentsAPIView(APIView):
 
     permission_classes = (AllowAny,)
 
-    def get(self, request: Request, comment_id: str) -> Response:
+    def get(self, _request: Request, comment_id: str) -> Response:
         """
         Retrieves a parent comment.
         For chile comments, below API is called that return all child comments in children field
@@ -134,7 +134,7 @@ class CommentsAPIView(APIView):
             )
         return Response(comment, status=status.HTTP_200_OK)
 
-    def delete(self, request: Request, comment_id: str) -> Response:
+    def delete(self, _request: Request, comment_id: str) -> Response:
         """
         Deletes a comment.
 

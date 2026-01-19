@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 from bson import ObjectId
-from django.core.management import call_command
 from django.contrib.auth.models import User  # pylint: disable=E5142
+from django.core.management import call_command
 from django.utils import timezone
 from pymongo.database import Database
 
@@ -22,7 +22,6 @@ from forum.models import (
     UserVote,
 )
 from forum.utils import get_trunc_title
-
 
 pytestmark = pytest.mark.django_db
 

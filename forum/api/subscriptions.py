@@ -9,11 +9,11 @@ from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
 from forum.backend import get_backend
+from forum.constants import FORUM_DEFAULT_PAGE, FORUM_DEFAULT_PER_PAGE
 from forum.pagination import ForumPagination
 from forum.serializers.subscriptions import SubscriptionSerializer
 from forum.serializers.thread import ThreadSerializer
 from forum.utils import ForumV2RequestError
-from forum.constants import FORUM_DEFAULT_PAGE, FORUM_DEFAULT_PER_PAGE
 
 
 def validate_user_and_thread(

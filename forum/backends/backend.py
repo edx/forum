@@ -477,6 +477,193 @@ class AbstractBackend:
         """
         raise NotImplementedError
 
+    # Mute/Unmute functionality
+    @classmethod
+    def mute_user(
+        cls,
+        muted_user_id: str,
+        muted_by_id: str,
+        course_id: str,
+        scope: str = "personal",
+        reason: str = "",
+        **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        Mute a user in discussions.
+
+        Args:
+            muted_user_id: ID of user to mute
+            muted_by_id: ID of user performing the mute
+            course_id: Course identifier
+            scope: Mute scope ('personal' or 'course')
+            reason: Optional reason for mute
+
+        Returns:
+            Dictionary containing mute record data
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def unmute_user(
+        cls,
+        muted_user_id: str,
+        unmuted_by_id: str,
+        course_id: str,
+        scope: str = "personal",
+        muted_by_id: Optional[str] = None,
+        **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        Unmute a user in discussions.
+
+        Args:
+            muted_user_id: ID of user to unmute
+            unmuted_by_id: ID of user performing the unmute
+            course_id: Course identifier
+            scope: Unmute scope ('personal' or 'course')
+            muted_by_id: Optional filter by original muter (for personal mutes)
+
+        Returns:
+            Dictionary containing unmute operation result
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def get_user_mute_status(
+        cls,
+        muted_user_id: str,
+        course_id: str,
+        requesting_user_id: Optional[str] = None,
+        **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        Get mute status for a user in a course.
+
+        Args:
+            muted_user_id: ID of user to check
+            course_id: Course identifier
+            requesting_user_id: ID of user requesting the status
+
+        Returns:
+            Dictionary containing mute status information
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def get_muted_users(
+        cls,
+        moderator_id: str,
+        course_id: str,
+        scope: str = "personal",
+        active_only: bool = True,
+        **kwargs: Any
+    ) -> list[dict[str, Any]]:
+        """
+        Get list of users muted by a moderator.
+
+        Args:
+            moderator_id: ID of the moderator
+            course_id: Course identifier
+            scope: Mute scope filter
+            active_only: Whether to return only active mutes
+
+        Returns:
+            List of muted user records
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def create_mute_exception(
+        cls, muted_user_id: str, exception_user_id: str, course_id: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        Create a mute exception for course-wide mutes.
+
+        Args:
+            muted_user_id: ID of the muted user
+            exception_user_id: ID of user creating exception
+            course_id: Course identifier
+
+        Returns:
+            Dictionary containing exception data
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def log_moderation_action(
+        cls,
+        action_type: str,
+        target_user_id: str,
+        moderator_id: str,
+        course_id: str,
+        scope: str = "personal",
+        reason: str = "",
+        metadata: Optional[dict[str, Any]] = None,
+        **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        Log a moderation action.
+
+        Args:
+            action_type: Type of action (mute, unmute, mute_and_report)
+            target_user_id: ID of the target user
+            moderator_id: ID of the moderating user
+            course_id: Course identifier
+            scope: Action scope
+            reason: Optional reason
+            metadata: Additional action metadata
+
+        Returns:
+            Dictionary containing log entry data
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def mute_and_report_user(
+        cls,
+        muted_user_id: str,
+        muted_by_id: str,
+        course_id: str,
+        scope: str = "personal",
+        reason: str = "",
+        **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        Mute a user and create a moderation report.
+
+        Args:
+            muted_user_id: ID of user to mute and report
+            muted_by_id: ID of user performing the action
+            course_id: Course identifier
+            scope: Mute scope ('personal' or 'course')
+            reason: Reason for muting and reporting
+
+        Returns:
+            Dictionary containing mute and report data
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def get_all_muted_users_for_course(
+        cls,
+        course_id: str,
+        requester_id: Optional[str] = None,
+        scope: str = "all",
+        **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        Get all muted users in a course.
+
+        Args:
+            course_id: Course identifier
+            requester_id: ID of user requesting the list
+            scope: Scope filter ('personal', 'course', or 'all')
+
+        Returns:
+            Dictionary containing list of muted users
+        """
+        raise NotImplementedError
+
     @staticmethod
     def get_deleted_threads_for_course(
         course_id: str,

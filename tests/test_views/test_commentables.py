@@ -1,9 +1,8 @@
 """Test commentables count api endpoint."""
 
-from typing import Any
-
 import random
 import uuid
+from typing import Any
 
 import pytest
 
