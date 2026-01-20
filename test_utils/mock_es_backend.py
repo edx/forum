@@ -3,7 +3,6 @@ Mock Elasticsearch Backend.
 """
 
 from typing import Any
-
 from forum.search.es import ElasticsearchDocumentBackend, ElasticsearchIndexBackend
 
 

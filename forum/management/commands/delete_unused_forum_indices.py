@@ -14,7 +14,7 @@ class Command(BaseCommand):
         "Delete all Elasticsearch indices that are not the latest for each model type."
     )
 
-    def handle(self, *_args: list[str], **_kwargs: dict[str, str]) -> None:
+    def handle(self, *args: list[str], **_kwargs: dict[str, str]) -> None:
         """
         Handles the execution of the delete_unused_forum_indices command.
 
@@ -22,6 +22,7 @@ class Command(BaseCommand):
         """
         search_backend = get_index_search_backend()
         indices_deleted_count = search_backend.delete_unused_indices()
+        # pylint: disable=no-member
         self.stdout.write(
             self.style.SUCCESS(
                 f"{indices_deleted_count} unused indices deleted successfully."

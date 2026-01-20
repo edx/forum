@@ -28,7 +28,7 @@ class Command(BaseCommand):
             help="Force the creation of new indices even if they exist.",
         )
 
-    def handle(self, *_args: list[str], **kwargs: dict[str, Any]) -> None:
+    def handle(self, *args: list[str], **kwargs: dict[str, Any]) -> None:
         """
         Handles the execution of the initialize_indices command.
 
@@ -42,4 +42,6 @@ class Command(BaseCommand):
         search_backend = get_index_search_backend()
         force_new_index = bool(kwargs.get("force", False))
         search_backend.initialize_indices(force_new_index=force_new_index)
-        self.stdout.write(self.style.SUCCESS("Forum indices initialized successfully."))
+        self.stdout.write(
+            self.style.SUCCESS("Forum indices initialized successfully.")
+        )  # pylint: disable=no-member

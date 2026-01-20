@@ -5,12 +5,12 @@ Handlers for the forum app.
 import logging
 from typing import Any
 
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 
-from forum.models import Comment, CommentThread
 from forum.search import get_document_search_backend
 from forum.utils import get_str_value_from_collection
+from forum.models import Comment, CommentThread
 
 log = logging.getLogger(__name__)
 

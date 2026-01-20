@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from django.core.management.base import BaseCommand, CommandParser
+from django.core.management.base import BaseCommand
+from django.core.management.base import CommandParser
 
 from forum.migration_helpers import (
     enable_mysql_backend_for_course,
@@ -51,4 +52,6 @@ class Command(BaseCommand):
                     f"Enabled mysql backend waffle flag for course {course_id}."
                 )
 
-        self.stdout.write(self.style.SUCCESS("Data migration completed successfully"))
+        self.stdout.write(
+            self.style.SUCCESS("Data migration completed successfully")
+        )  # pylint: disable=no-member

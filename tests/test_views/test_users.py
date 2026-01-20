@@ -1,7 +1,6 @@
 """Tests for Users apis."""
 
 from typing import Any
-
 import pytest
 
 from forum.constants import RETIRED_BODY, RETIRED_TITLE

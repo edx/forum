@@ -2,10 +2,9 @@
 Unit tests for the meilisearch search backend.
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch, Mock
 
 import search.meilisearch as m
-
 from forum.search import meilisearch
 
 TEST_ID = "abcd"

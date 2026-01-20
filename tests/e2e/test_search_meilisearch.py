@@ -4,8 +4,8 @@ Meilisearch end-to-end tests.
 
 import typing as t
 
-import pytest
 from django.test import override_settings
+import pytest
 
 import forum.search.meilisearch
 

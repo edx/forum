@@ -11,8 +11,6 @@ from rest_framework.serializers import ValidationError
 from forum.ai_moderation import moderate_and_flag_spam
 from forum.api.users import mark_thread_as_read
 from forum.backend import get_backend
-from forum.backends.mongodb.api import MongoBackend
-from forum.backends.mysql.api import MySQLBackend
 from forum.serializers.thread import ThreadSerializer
 from forum.utils import ForumV2RequestError, get_int_value_from_collection, str_to_bool
 
@@ -427,6 +425,9 @@ def get_course_id_by_thread(thread_id: str) -> str | None:
     Return course_id for the matching thread.
     It searches for thread_id both in mongodb and mysql.
     """
+    #  pylint: disable=C0415
+    from forum.backends.mongodb.api import MongoBackend
+    from forum.backends.mysql.api import MySQLBackend
 
     return (
         MongoBackend.get_course_id_by_thread_id(thread_id)

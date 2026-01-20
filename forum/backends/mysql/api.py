@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Union
 
 from django.contrib.auth.models import User  # pylint: disable=E5142
 from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.paginator import Paginator
 from django.db.models import (
     Case,
@@ -2542,30 +2542,41 @@ class MySQLBackend(AbstractBackend):
             muted_user = User.objects.get(pk=int(muted_user_id))
             muted_by_user = User.objects.get(pk=int(muted_by_id))
 
+            # Prevent self-muting
+            if muted_user.pk == muted_by_user.pk:
+                raise ValidationError("Users cannot mute themselves")
+
+            # Prevent learners from muting staff
+            if muted_user.is_staff and not muted_by_user.is_staff:
+                raise ValidationError("Learners cannot mute staff users")
+
             # Check if mute already exists
             existing_mute = DiscussionMute.objects.filter(
                 muted_user=muted_user, course_id=course_id, scope=scope, is_active=True
             )
-
             if scope == DiscussionMute.Scope.PERSONAL:
                 existing_mute = existing_mute.filter(muted_by=muted_by_user)
 
             if existing_mute.exists():
-                raise ValueError("User is already muted in this scope")
+                raise ValidationError("User is already muted in this scope")
 
-            # Create the mute record
-            mute = DiscussionMute.objects.create(
+            # Create and validate the mute
+            mute = DiscussionMute(
                 muted_user=muted_user,
                 muted_by=muted_by_user,
                 course_id=course_id,
                 scope=scope,
                 reason=reason,
             )
+            mute.full_clean()  # calls model clean(), prevents self-muting and other model-level validation
+            mute.save()
 
             return mute.to_dict()
 
         except User.DoesNotExist as e:
             raise ValueError(f"User not found: {e}") from e
+        except ValidationError as ve:
+            raise ValueError(f"Validation error: {ve}") from ve
         except Exception as e:
             raise ValueError(f"Failed to mute user: {e}") from e
 
@@ -2678,9 +2689,9 @@ class MySQLBackend(AbstractBackend):
         Get mute status for a user.
 
         Args:
-            user_id: ID of user to check
+            muted_user_id: ID of user to check
             course_id: Course identifier
-            viewer_id: ID of user requesting the status
+            requesting_user_id: ID of user requesting the status
 
         Returns:
             Dictionary containing mute status information
@@ -2782,8 +2793,49 @@ class MySQLBackend(AbstractBackend):
         cls, muted_user_id: str, exception_user_id: str, course_id: str, **kwargs: Any
     ) -> dict[str, Any]:
         """Create a mute exception for course-wide mutes."""
-        # TODO: Implement mute exception logic when needed
-        raise NotImplementedError("Mute exceptions not yet implemented")
+
+        try:
+            muted_user = User.objects.get(pk=int(muted_user_id))
+            exception_user = User.objects.get(pk=int(exception_user_id))
+
+            if not exception_user.is_staff:
+                raise ValidationError("Only staff users can create mute exceptions")
+
+            # Prevent creating exception for non-course-wide mutes
+            active_course_mute = DiscussionMute.objects.filter(
+                muted_user=muted_user,
+                course_id=course_id,
+                scope=DiscussionMute.Scope.COURSE,
+                is_active=True,
+            ).first()
+            if not active_course_mute:
+                raise ValidationError("No active course-wide mute found for the user")
+
+            # Prevent duplicate exceptions
+            if DiscussionMuteException.objects.filter(
+                muted_user=muted_user,
+                exception_user=exception_user,
+                course_id=course_id,
+            ).exists():
+                raise ValidationError("Mute exception already exists")
+
+            # Create and save the exception
+            mute_exception = DiscussionMuteException(
+                muted_user=muted_user,
+                exception_user=exception_user,
+                course_id=course_id,
+            )
+            mute_exception.full_clean()
+            mute_exception.save()
+
+            return mute_exception.to_dict()
+
+        except User.DoesNotExist as e:
+            raise ValueError(f"User not found: {e}") from e
+        except ValidationError as ve:
+            raise ValueError(f"Validation error: {ve}") from ve
+        except Exception as e:
+            raise ValueError(f"Failed to create mute exception: {e}") from e
 
     @classmethod
     def get_muted_users(

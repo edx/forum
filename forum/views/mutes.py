@@ -5,7 +5,7 @@ Forum Mute / Unmute API Views.
 import logging
 
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -29,7 +29,7 @@ class MuteUserAPIView(APIView):
     Handles POST requests to mute a user.
     """
 
-    permission_classes = (AllowAny,)
+    permission_classes = (IsAuthenticated,)
 
     def post(self, request: Request, user_id: str, course_id: str) -> Response:
         """
@@ -86,7 +86,7 @@ class UnmuteUserAPIView(APIView):
     Handles POST requests to unmute a user.
     """
 
-    permission_classes = (AllowAny,)
+    permission_classes = (IsAuthenticated,)
 
     def post(self, request: Request, user_id: str, course_id: str) -> Response:
         """
@@ -112,7 +112,7 @@ class UnmuteUserAPIView(APIView):
 
             if not muter_id:
                 return Response(
-                    {"error": "moderator_id is required"},
+                    {"error": "muter_id is required"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -143,7 +143,7 @@ class MuteAndReportUserAPIView(APIView):
     Handles POST requests to mute and report a user.
     """
 
-    permission_classes = (AllowAny,)
+    permission_classes = (IsAuthenticated,)
 
     def post(self, request: Request, user_id: str, course_id: str) -> Response:
         """
@@ -200,7 +200,7 @@ class UserMuteStatusAPIView(APIView):
     Handles GET requests to check if a user is muted.
     """
 
-    permission_classes = (AllowAny,)
+    permission_classes = (IsAuthenticated,)
 
     def get(self, request: Request, user_id: str, course_id: str) -> Response:
         """
@@ -251,7 +251,7 @@ class CourseMutedUsersAPIView(APIView):
     Handles GET requests to get course-wide muted users list.
     """
 
-    permission_classes = (AllowAny,)
+    permission_classes = (IsAuthenticated,)
 
     def get(self, request: Request, course_id: str) -> Response:
         """

@@ -69,11 +69,15 @@ class Command(BaseCommand):
             client.close()
 
             self.stdout.write(
-                self.style.SUCCESS("Successfully created MongoDB mute indexes!")
+                self.style.SUCCESS(
+                    "Successfully created MongoDB mute indexes!"
+                )  # pylint: disable=no-member
             )
 
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"Error creating indexes: {e}"))
+            self.stdout.write(
+                self.style.ERROR(f"Error creating indexes: {e}")
+            )  # pylint: disable=no-member
             raise
 
     def _create_mute_indexes(self, db: Any, drop_existing: bool) -> None:

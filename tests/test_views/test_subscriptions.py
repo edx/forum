@@ -1,7 +1,6 @@
 """Tests for subscription apis."""
 
 from typing import Any
-
 import pytest
 
 from test_utils.client import APIClient

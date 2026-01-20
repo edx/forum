@@ -35,7 +35,7 @@ class Command(BaseCommand):
             help="Extra minutes to adjust the start time for catch-up.",
         )
 
-    def handle(self, *_args: list[str], **kwargs: dict[str, int]) -> None:
+    def handle(self, *args: list[str], **kwargs: dict[str, int]) -> None:
         """
         Handles the execution of the rebuild_indices command.
 
@@ -56,4 +56,6 @@ class Command(BaseCommand):
         search_backend.rebuild_indices(
             batch_size=batch_size, extra_catchup_minutes=extra_catchup_minutes
         )
-        self.stdout.write(self.style.SUCCESS("Forum indices rebuilt successfully."))
+        self.stdout.write(
+            self.style.SUCCESS("Forum indices rebuilt successfully.")
+        )  # pylint: disable=no-member
