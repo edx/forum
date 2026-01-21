@@ -27,7 +27,7 @@ class CommentsAPIView(APIView):
     def get(self, _request: Request, comment_id: str) -> Response:
         """
         Retrieves a parent comment.
-        For chile comments, below API is called that return all child comments in children field
+        For child comments, below API is called that return all child comments in children field
         url: http://localhost:8000/forum/api/v2/threads/66ab94950dead7001deb947a
 
         Parameters:

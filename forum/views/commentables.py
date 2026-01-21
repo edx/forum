@@ -18,7 +18,7 @@ class CommentablesCountAPIView(APIView):
 
     def get(self, _request: Request, course_id: str) -> Response:
         """
-        Retrieves a the threads count based on thread_type.
+        Retrieves the threads count based on thread_type.
 
         Parameters:
             request (Request): The incoming request.

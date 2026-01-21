@@ -2292,11 +2292,7 @@ class MongoBackend(AbstractBackend):
         Returns:
             List of muted user records
         """
-        try:
-            # MongoDB implementation placeholder
-            return []
-        except Exception as e:
-            raise ForumV2RequestError(f"Failed to get muted users: {str(e)}") from e
+        return []
 
     @classmethod
     def create_mute_exception(
@@ -2313,18 +2309,12 @@ class MongoBackend(AbstractBackend):
         Returns:
             Dictionary containing exception data
         """
-        try:
-            # MongoDB implementation placeholder
-            return {
-                "muted_user_id": muted_user_id,
-                "exception_user_id": exception_user_id,
-                "course_id": course_id,
-                "backend": "mongodb",
-            }
-        except Exception as e:
-            raise ForumV2RequestError(
-                f"Failed to create mute exception: {str(e)}"
-            ) from e
+        return {
+            "muted_user_id": muted_user_id,
+            "exception_user_id": exception_user_id,
+            "course_id": course_id,
+            "backend": "mongodb",
+        }
 
     @classmethod
     def log_moderation_action(

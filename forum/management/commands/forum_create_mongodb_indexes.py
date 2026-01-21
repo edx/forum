@@ -21,6 +21,6 @@ class Command(BaseCommand):
         BaseContents().create_indexes()
         self.stdout.write(
             self.style.SUCCESS(
-                "Created/Updated Mongodb indexes successfuly."
+                "Created/Updated Mongodb indexes successfully."
             )  # pylint: disable=no-member
         )
