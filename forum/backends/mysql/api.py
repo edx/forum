@@ -3,11 +3,11 @@
 import math
 import random
 from datetime import timedelta
-from typing import Any, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from django.contrib.auth.models import User  # pylint: disable=E5142
 from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.paginator import Paginator
 from django.db.models import (
     Case,
@@ -32,6 +32,8 @@ from forum.backends.mysql.models import (
     Comment,
     CommentThread,
     CourseStat,
+    DiscussionMute,
+    DiscussionMuteException,
     EditHistory,
     ForumUser,
     HistoricalAbuseFlagger,
@@ -2511,6 +2513,350 @@ class MySQLBackend(AbstractBackend):
             return cls.update_thread(content_id, **update_data)
         else:
             return cls.update_comment(content_id, **update_data)
+
+    # Mute/Unmute Methods for MySQL Backend
+    @classmethod
+    def mute_user(
+        cls,
+        muted_user_id: str,
+        muter_id: str,
+        course_id: str,
+        scope: str = "personal",
+        reason: str = "",
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Mute a user in discussions.
+
+        Args:
+            muted_user_id: ID of user to mute
+            muter_id: ID of user performing the mute
+            course_id: Course identifier
+            scope: Mute scope ('personal' or 'course')
+            reason: Optional reason for mute
+
+        Returns:
+            Dictionary containing mute record data
+        """
+        try:
+            muted_user = User.objects.get(pk=int(muted_user_id))
+            muted_by_user = User.objects.get(pk=int(muter_id))
+
+            # Prevent self-muting
+            if muted_user.pk == muted_by_user.pk:
+                raise ValidationError("Users cannot mute themselves")
+
+            # Prevent learners from muting staff
+            if muted_user.is_staff and not muted_by_user.is_staff:
+                raise ValidationError("Learners cannot mute staff users")
+
+            # Check if mute already exists
+            existing_mute = DiscussionMute.objects.filter(
+                muted_user=muted_user, course_id=course_id, scope=scope, is_active=True
+            )
+            if scope == DiscussionMute.Scope.PERSONAL:
+                existing_mute = existing_mute.filter(muted_by=muted_by_user)
+
+            if existing_mute.exists():
+                raise ValidationError("User is already muted in this scope")
+
+            # Create and validate the mute
+            mute = DiscussionMute(
+                muted_user=muted_user,
+                muted_by=muted_by_user,
+                course_id=course_id,
+                scope=scope,
+                reason=reason,
+            )
+            mute.full_clean()  # calls model clean(), prevents self-muting and other model-level validation
+            mute.save()
+
+            return mute.to_dict()
+
+        except User.DoesNotExist as e:
+            raise ValueError(f"User not found: {e}") from e
+        except ValidationError as ve:
+            raise ValueError(f"Validation error: {ve}") from ve
+        except Exception as e:
+            raise ValueError(f"Failed to mute user: {e}") from e
+
+    @classmethod
+    def unmute_user(
+        cls,
+        muted_user_id: str,
+        unmuted_by_id: str,
+        course_id: str,
+        scope: str = "personal",
+        muter_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Unmute a user in discussions.
+
+        Args:
+            muted_user_id: ID of user to unmute
+            unmuted_by_id: ID of user performing the unmute
+            course_id: Course identifier
+            scope: Unmute scope ('personal' or 'course')
+            muter_id: Original muter ID (for personal unmutes)
+
+        Returns:
+            Dictionary containing unmute result
+        """
+        try:
+            muted_user = User.objects.get(pk=int(muted_user_id))
+            unmuted_by_user = User.objects.get(pk=int(unmuted_by_id))
+
+            # Find the active mute
+            mute_query = DiscussionMute.objects.filter(
+                muted_user=muted_user, course_id=course_id, scope=scope, is_active=True
+            )
+
+            if scope == DiscussionMute.Scope.PERSONAL and muter_id:
+                muted_by_user = User.objects.get(pk=int(muter_id))
+                mute_query = mute_query.filter(muted_by=muted_by_user)
+
+            mute = mute_query.first()
+            if not mute:
+                raise ValueError("No active mute found")
+
+            # Deactivate the mute
+            mute.is_active = False
+            mute.unmuted_by = unmuted_by_user
+            mute.unmuted_at = timezone.now()
+            mute.save()
+
+            return {
+                "message": "User unmuted successfully",
+                "muted_user_id": str(muted_user.pk),
+                "unmuted_by_id": str(unmuted_by_user.pk),
+                "course_id": course_id,
+                "scope": scope,
+            }
+
+        except User.DoesNotExist as e:
+            raise ValueError(f"User not found: {e}") from e
+        except Exception as e:
+            raise ValueError(f"Failed to unmute user: {e}") from e
+
+    @classmethod
+    def mute_and_report_user(
+        cls,
+        muted_user_id: str,
+        muter_id: str,
+        course_id: str,
+        scope: str = "personal",
+        reason: str = "",
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Mute a user and create a moderation report.
+
+        Args:
+            muted_user_id: ID of user to mute and report
+            muter_id: ID of user performing the action
+            course_id: Course identifier
+            scope: Mute scope ('personal' or 'course')
+            reason: Reason for muting and reporting
+
+        Returns:
+            Dictionary containing mute and report data
+        """
+        # First mute the user
+        mute_result = cls.mute_user(
+            muted_user_id=muted_user_id,
+            muter_id=muter_id,
+            course_id=course_id,
+            scope=scope,
+            reason=reason,
+        )
+
+        # Add reporting flag to indicate this was also reported
+        mute_result["reported"] = True
+        mute_result["action"] = "mute_and_report"
+
+        return mute_result
+
+    @classmethod
+    def get_user_mute_status(
+        cls,
+        muted_user_id: str,
+        course_id: str,
+        requesting_user_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Get mute status for a user.
+
+        Args:
+            muted_user_id: ID of user to check
+            course_id: Course identifier
+            requesting_user_id: ID of user requesting the status
+
+        Returns:
+            Dictionary containing mute status information
+        """
+        try:
+            user = User.objects.get(pk=int(muted_user_id))
+            viewer = (
+                User.objects.get(pk=int(requesting_user_id))
+                if requesting_user_id
+                else None
+            )
+
+            # Check for active mutes
+            personal_mutes = DiscussionMute.objects.filter(
+                muted_user=user,
+                muted_by=viewer,
+                course_id=course_id,
+                scope=DiscussionMute.Scope.PERSONAL,
+                is_active=True,
+            )
+
+            course_mutes = DiscussionMute.objects.filter(
+                muted_user=user,
+                course_id=course_id,
+                scope=DiscussionMute.Scope.COURSE,
+                is_active=True,
+            )
+
+            # Check for exceptions
+            has_exception = DiscussionMuteException.objects.filter(
+                muted_user=user, exception_user=viewer, course_id=course_id
+            ).exists()
+
+            is_personally_muted = personal_mutes.exists()
+            is_course_muted = course_mutes.exists() and not has_exception
+
+            return {
+                "user_id": muted_user_id,
+                "course_id": course_id,
+                "is_muted": is_personally_muted or is_course_muted,
+                "personal_mute": is_personally_muted,
+                "course_mute": is_course_muted,
+                "has_exception": has_exception,
+                "mute_details": [mute.to_dict() for mute in personal_mutes]
+                + [mute.to_dict() for mute in course_mutes],
+            }
+
+        except User.DoesNotExist as e:
+            raise ValueError(f"User not found: {e}") from e
+        except Exception as e:
+            raise ValueError(f"Failed to get mute status: {e}") from e
+
+    @classmethod
+    def get_all_muted_users_for_course(
+        cls,
+        course_id: str,
+        requester_id: Optional[str] = None,
+        scope: str = "all",
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Get all muted users in a course.
+
+        Args:
+            course_id: Course identifier
+            requester_id: ID of user requesting the list
+            scope: Scope filter ('personal', 'course', or 'all')
+
+        Returns:
+            Dictionary containing list of muted users
+        """
+        try:
+            query = DiscussionMute.objects.filter(course_id=course_id, is_active=True)
+
+            if scope == "personal":
+                query = query.filter(scope=DiscussionMute.Scope.PERSONAL)
+                if requester_id:
+                    query = query.filter(muted_by__pk=int(requester_id))
+            elif scope == "course":
+                query = query.filter(scope=DiscussionMute.Scope.COURSE)
+
+            muted_users = []
+            for mute in query.select_related("muted_user", "muted_by"):
+                mute_data = mute.to_dict()
+                muted_users.append(mute_data)
+
+            return {
+                "course_id": course_id,
+                "scope": scope,
+                "muted_users": muted_users,
+                "total_count": len(muted_users),
+            }
+
+        except Exception as e:
+            raise ValueError(f"Failed to get muted users: {e}") from e
+
+    @classmethod
+    def create_mute_exception(
+        cls, muted_user_id: str, exception_user_id: str, course_id: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        """Create a mute exception for course-wide mutes."""
+
+        try:
+            muted_user = User.objects.get(pk=int(muted_user_id))
+            exception_user = User.objects.get(pk=int(exception_user_id))
+
+            if not exception_user.is_staff:
+                raise ValidationError("Only staff users can create mute exceptions")
+
+            # Prevent creating exception for non-course-wide mutes
+            active_course_mute = DiscussionMute.objects.filter(
+                muted_user=muted_user,
+                course_id=course_id,
+                scope=DiscussionMute.Scope.COURSE,
+                is_active=True,
+            ).first()
+            if not active_course_mute:
+                raise ValidationError("No active course-wide mute found for the user")
+
+            # Prevent duplicate exceptions
+            if DiscussionMuteException.objects.filter(
+                muted_user=muted_user,
+                exception_user=exception_user,
+                course_id=course_id,
+            ).exists():
+                raise ValidationError("Mute exception already exists")
+
+            # Create and save the exception
+            mute_exception = DiscussionMuteException(
+                muted_user=muted_user,
+                exception_user=exception_user,
+                course_id=course_id,
+            )
+            mute_exception.full_clean()
+            mute_exception.save()
+
+            return mute_exception.to_dict()
+
+        except User.DoesNotExist as e:
+            raise ValueError(f"User not found: {e}") from e
+        except ValidationError as ve:
+            raise ValueError(f"Validation error: {ve}") from ve
+        except Exception as e:
+            raise ValueError(f"Failed to create mute exception: {e}") from e
+
+    @classmethod
+    def get_muted_users(
+        cls,
+        moderator_id: str,
+        course_id: str,
+        scope: str = "personal",
+        active_only: bool = True,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        """Get list of users muted by a moderator."""
+        try:
+            queryset = DiscussionMute.objects.filter(
+                course_id=course_id, muter_id=moderator_id, scope=scope
+            )
+            if active_only:
+                queryset = queryset.filter(is_active=True)
+
+            return [mute.to_dict() for mute in queryset]
+        except Exception as e:
+            raise ValueError(f"Failed to get muted users for moderator: {e}") from e
 
     @staticmethod
     def get_deleted_threads_for_course(
