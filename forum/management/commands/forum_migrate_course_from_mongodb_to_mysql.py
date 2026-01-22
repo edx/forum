@@ -32,7 +32,7 @@ class Command(BaseCommand):
             "courses", nargs="+", type=str, help="List of course IDs or `all`"
         )
 
-    def handle(self, *_args: str, **options: dict[str, Any]) -> None:
+    def handle(self, *args: str, **options: dict[str, Any]) -> None:
         """Handle the command."""
         db = get_database()
 
@@ -52,6 +52,4 @@ class Command(BaseCommand):
                     f"Enabled mysql backend waffle flag for course {course_id}."
                 )
 
-        self.stdout.write(
-            self.style.SUCCESS("Data migration completed successfully")
-        )  # pylint: disable=no-member
+        self.stdout.write(self.style.SUCCESS("Data migration completed successfully"))

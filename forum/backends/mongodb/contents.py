@@ -237,7 +237,7 @@ class Contents(BaseContents):
         historical_abuse_flaggers: Optional[list[str]] = None,
         body: Optional[str] = None,
         title: Optional[str] = None,
-        **_kwargs: Any
+        **kwargs: Any
     ) -> int:
         """
         Updates a contents document in the database based on the provided _id.

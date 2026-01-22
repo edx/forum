@@ -61,7 +61,7 @@ class MuteUserAPIView(APIView):
 
             result = mute_user(
                 muted_user_id=user_id,
-                muted_by_id=muter_id,
+                muter_id=muter_id,
                 course_id=course_id,
                 scope=scope,
                 reason=reason,
@@ -100,7 +100,7 @@ class UnmuteUserAPIView(APIView):
         Body:
             muter_id: ID of user performing the unmute
             scope: Unmute scope ('personal' or 'course')
-            muted_by_id: Optional - for personal scope unmutes
+            muter_id: Optional - for personal scope unmutes
 
         Returns:
             Response: A response with the unmute operation result.
@@ -108,7 +108,7 @@ class UnmuteUserAPIView(APIView):
         try:
             muter_id = request.data.get("muter_id")
             scope = request.data.get("scope", "personal")
-            muted_by_id = request.data.get("muted_by_id")
+            muter_id = request.data.get("muter_id")
 
             if not muter_id:
                 return Response(
@@ -121,7 +121,7 @@ class UnmuteUserAPIView(APIView):
                 unmuted_by_id=muter_id,
                 course_id=course_id,
                 scope=scope,
-                muted_by_id=muted_by_id,
+                muter_id=muter_id,
             )
 
             return Response(result, status=status.HTTP_200_OK)
@@ -175,7 +175,7 @@ class MuteAndReportUserAPIView(APIView):
 
             result = mute_and_report_user(
                 muted_user_id=user_id,
-                muted_by_id=muter_id,
+                muter_id=muter_id,
                 course_id=course_id,
                 scope=scope,
                 reason=reason,

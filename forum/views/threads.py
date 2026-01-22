@@ -52,7 +52,7 @@ class ThreadsAPIView(APIView):
             )
         return Response(data, status=status.HTTP_200_OK)
 
-    def delete(self, _request: Request, thread_id: str) -> Response:
+    def delete(self, request: Request, thread_id: str) -> Response:
         """
         Deletes a thread by its ID.
 

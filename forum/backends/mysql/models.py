@@ -1035,7 +1035,7 @@ class DiscussionMute(models.Model):
             "_id": str(self.pk),
             "muted_user_id": str(self.muted_user.pk),
             "muted_user_username": self.muted_user.username,
-            "muted_by_id": str(self.muted_by.pk),
+            "muter_id": str(self.muted_by.pk),
             "muted_by_username": self.muted_by.username,
             "unmuted_by_id": str(self.unmuted_by.pk) if self.unmuted_by else None,
             "unmuted_by_username": (

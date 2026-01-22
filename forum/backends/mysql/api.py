@@ -2519,7 +2519,7 @@ class MySQLBackend(AbstractBackend):
     def mute_user(
         cls,
         muted_user_id: str,
-        muted_by_id: str,
+        muter_id: str,
         course_id: str,
         scope: str = "personal",
         reason: str = "",
@@ -2530,7 +2530,7 @@ class MySQLBackend(AbstractBackend):
 
         Args:
             muted_user_id: ID of user to mute
-            muted_by_id: ID of user performing the mute
+            muter_id: ID of user performing the mute
             course_id: Course identifier
             scope: Mute scope ('personal' or 'course')
             reason: Optional reason for mute
@@ -2540,7 +2540,7 @@ class MySQLBackend(AbstractBackend):
         """
         try:
             muted_user = User.objects.get(pk=int(muted_user_id))
-            muted_by_user = User.objects.get(pk=int(muted_by_id))
+            muted_by_user = User.objects.get(pk=int(muter_id))
 
             # Prevent self-muting
             if muted_user.pk == muted_by_user.pk:
@@ -2587,7 +2587,7 @@ class MySQLBackend(AbstractBackend):
         unmuted_by_id: str,
         course_id: str,
         scope: str = "personal",
-        muted_by_id: Optional[str] = None,
+        muter_id: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """
@@ -2598,7 +2598,7 @@ class MySQLBackend(AbstractBackend):
             unmuted_by_id: ID of user performing the unmute
             course_id: Course identifier
             scope: Unmute scope ('personal' or 'course')
-            muted_by_id: Original muter ID (for personal unmutes)
+            muter_id: Original muter ID (for personal unmutes)
 
         Returns:
             Dictionary containing unmute result
@@ -2612,8 +2612,8 @@ class MySQLBackend(AbstractBackend):
                 muted_user=muted_user, course_id=course_id, scope=scope, is_active=True
             )
 
-            if scope == DiscussionMute.Scope.PERSONAL and muted_by_id:
-                muted_by_user = User.objects.get(pk=int(muted_by_id))
+            if scope == DiscussionMute.Scope.PERSONAL and muter_id:
+                muted_by_user = User.objects.get(pk=int(muter_id))
                 mute_query = mute_query.filter(muted_by=muted_by_user)
 
             mute = mute_query.first()
@@ -2643,7 +2643,7 @@ class MySQLBackend(AbstractBackend):
     def mute_and_report_user(
         cls,
         muted_user_id: str,
-        muted_by_id: str,
+        muter_id: str,
         course_id: str,
         scope: str = "personal",
         reason: str = "",
@@ -2654,7 +2654,7 @@ class MySQLBackend(AbstractBackend):
 
         Args:
             muted_user_id: ID of user to mute and report
-            muted_by_id: ID of user performing the action
+            muter_id: ID of user performing the action
             course_id: Course identifier
             scope: Mute scope ('personal' or 'course')
             reason: Reason for muting and reporting
@@ -2665,7 +2665,7 @@ class MySQLBackend(AbstractBackend):
         # First mute the user
         mute_result = cls.mute_user(
             muted_user_id=muted_user_id,
-            muted_by_id=muted_by_id,
+            muter_id=muter_id,
             course_id=course_id,
             scope=scope,
             reason=reason,
@@ -2849,7 +2849,7 @@ class MySQLBackend(AbstractBackend):
         """Get list of users muted by a moderator."""
         try:
             queryset = DiscussionMute.objects.filter(
-                course_id=course_id, muted_by_id=moderator_id, scope=scope
+                course_id=course_id, muter_id=moderator_id, scope=scope
             )
             if active_only:
                 queryset = queryset.filter(is_active=True)
@@ -2857,33 +2857,6 @@ class MySQLBackend(AbstractBackend):
             return [mute.to_dict() for mute in queryset]
         except Exception as e:
             raise ValueError(f"Failed to get muted users for moderator: {e}") from e
-
-    @classmethod
-    def log_moderation_action(
-        cls,
-        action_type: str,
-        target_user_id: str,
-        moderator_id: str,
-        course_id: str,
-        scope: str = "personal",
-        reason: str = "",
-        metadata: Optional[dict[str, Any]] = None,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        """Log a moderation action."""
-        # TODO: Implement moderation logging when needed
-        log_entry = {
-            "action_type": action_type,
-            "target_user_id": target_user_id,
-            "moderator_id": moderator_id,
-            "course_id": course_id,
-            "scope": scope,
-            "reason": reason,
-            "metadata": metadata or {},
-            "timestamp": timezone.now().isoformat(),
-        }
-        # For now, just return the log entry data
-        return log_entry
 
     @staticmethod
     def get_deleted_threads_for_course(

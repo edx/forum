@@ -2042,7 +2042,7 @@ class MongoBackend(AbstractBackend):
     def mute_user(
         cls,
         muted_user_id: str,
-        muted_by_id: str,
+        muter_id: str,
         course_id: str,
         scope: str = "personal",
         reason: str = "",
@@ -2053,7 +2053,7 @@ class MongoBackend(AbstractBackend):
 
         Args:
             muted_user_id: ID of user to mute
-            muted_by_id: ID of user performing the mute
+            muter_id: ID of user performing the mute
             course_id: Course identifier
             scope: Mute scope ('personal' or 'course')
             reason: Optional reason for mute
@@ -2068,7 +2068,7 @@ class MongoBackend(AbstractBackend):
             # Create the mute record
             mute_doc = mutes.create_mute(
                 muted_user_id=muted_user_id,
-                muted_by_id=muted_by_id,
+                muter_id=muter_id,
                 course_id=course_id,
                 scope=scope,
                 reason=reason,
@@ -2078,7 +2078,7 @@ class MongoBackend(AbstractBackend):
             logs.log_action(
                 action_type="mute",
                 target_user_id=muted_user_id,
-                moderator_id=muted_by_id,
+                moderator_id=muter_id,
                 course_id=course_id,
                 scope=scope,
                 reason=reason,
@@ -2099,7 +2099,7 @@ class MongoBackend(AbstractBackend):
         unmuted_by_id: str,
         course_id: str,
         scope: str = "personal",
-        muted_by_id: Optional[str] = None,
+        muter_id: Optional[str] = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """
@@ -2110,7 +2110,7 @@ class MongoBackend(AbstractBackend):
             unmuted_by_id: ID of user performing the unmute
             course_id: Course identifier
             scope: Unmute scope ('personal' or 'course')
-            muted_by_id: Original muter ID (for personal unmutes)
+            muter_id: Original muter ID (for personal unmutes)
 
         Returns:
             Dictionary containing unmute result
@@ -2125,7 +2125,7 @@ class MongoBackend(AbstractBackend):
                 unmuted_by_id=unmuted_by_id,
                 course_id=course_id,
                 scope=scope,
-                muted_by_id=muted_by_id,
+                muter_id=muter_id,
             )
 
             # Log the action
@@ -2149,7 +2149,7 @@ class MongoBackend(AbstractBackend):
     def mute_and_report_user(
         cls,
         muted_user_id: str,
-        muted_by_id: str,
+        muter_id: str,
         course_id: str,
         scope: str = "personal",
         reason: str = "",
@@ -2160,7 +2160,7 @@ class MongoBackend(AbstractBackend):
 
         Args:
             muted_user_id: ID of user to mute and report
-            muted_by_id: ID of user performing the action
+            muter_id: ID of user performing the action
             course_id: Course identifier
             scope: Mute scope ('personal' or 'course')
             reason: Reason for muting and reporting
@@ -2172,7 +2172,7 @@ class MongoBackend(AbstractBackend):
             # First mute the user
             mute_result = cls.mute_user(
                 muted_user_id=muted_user_id,
-                muted_by_id=muted_by_id,
+                muter_id=muter_id,
                 course_id=course_id,
                 scope=scope,
                 reason=reason,
@@ -2183,7 +2183,7 @@ class MongoBackend(AbstractBackend):
             logs.log_action(
                 action_type="mute_and_report",
                 target_user_id=muted_user_id,
-                moderator_id=muted_by_id,
+                moderator_id=muter_id,
                 course_id=course_id,
                 scope=scope,
                 reason=reason,
@@ -2315,47 +2315,3 @@ class MongoBackend(AbstractBackend):
             "course_id": course_id,
             "backend": "mongodb",
         }
-
-    @classmethod
-    def log_moderation_action(
-        cls,
-        action_type: str,
-        target_user_id: str,
-        moderator_id: str,
-        course_id: str,
-        scope: str = "personal",
-        reason: str = "",
-        metadata: Optional[dict[str, Any]] = None,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        """
-        Log a moderation action using MongoDB backend.
-
-        Args:
-            action_type: Type of action (mute, unmute, mute_and_report)
-            target_user_id: ID of the target user
-            moderator_id: ID of the moderating user
-            course_id: Course identifier
-            scope: Action scope
-            reason: Optional reason
-            metadata: Additional action metadata
-
-        Returns:
-            Dictionary containing log entry data
-        """
-        try:
-            # MongoDB implementation placeholder
-            return {
-                "action_type": action_type,
-                "target_user_id": target_user_id,
-                "moderator_id": moderator_id,
-                "course_id": course_id,
-                "scope": scope,
-                "reason": reason,
-                "metadata": metadata or {},
-                "backend": "mongodb",
-            }
-        except Exception as e:
-            raise ForumV2RequestError(
-                f"Failed to log moderation action: {str(e)}"
-            ) from e

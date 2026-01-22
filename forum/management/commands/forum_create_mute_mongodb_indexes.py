@@ -1,6 +1,4 @@
-"""
-Management command to create MongoDB indexes for discussion mute functionality.
-"""
+"""Management command for creating mongodb indexes for discussion mute functionality."""
 
 from typing import Any
 
@@ -106,12 +104,12 @@ class Command(BaseCommand):
             if "already exists" not in str(e):
                 raise
 
-        # Index for personal mutes (includes muted_by_id)
+        # Index for personal mutes (includes muter_id)
         try:
             collection.create_index(
                 [
                     ("muted_user_id", pymongo.ASCENDING),
-                    ("muted_by_id", pymongo.ASCENDING),
+                    ("muter_id", pymongo.ASCENDING),
                     ("course_id", pymongo.ASCENDING),
                     ("scope", pymongo.ASCENDING),
                     ("is_active", pymongo.ASCENDING),
@@ -142,7 +140,7 @@ class Command(BaseCommand):
         try:
             collection.create_index(
                 [
-                    ("muted_by_id", pymongo.ASCENDING),
+                    ("muter_id", pymongo.ASCENDING),
                     ("course_id", pymongo.ASCENDING),
                     ("created_at", pymongo.DESCENDING),
                 ],
@@ -158,7 +156,7 @@ class Command(BaseCommand):
             collection.create_index(
                 [
                     ("muted_user_id", pymongo.ASCENDING),
-                    ("muted_by_id", pymongo.ASCENDING),
+                    ("muter_id", pymongo.ASCENDING),
                     ("course_id", pymongo.ASCENDING),
                     ("scope", pymongo.ASCENDING),
                 ],

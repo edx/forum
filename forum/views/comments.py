@@ -24,7 +24,7 @@ class CommentsAPIView(APIView):
 
     permission_classes = (AllowAny,)
 
-    def get(self, _request: Request, comment_id: str) -> Response:
+    def get(self, request: Request, comment_id: str) -> Response:
         """
         Retrieves a parent comment.
         For child comments, below API is called that return all child comments in children field

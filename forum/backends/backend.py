@@ -482,7 +482,7 @@ class AbstractBackend:
     def mute_user(
         cls,
         muted_user_id: str,
-        muted_by_id: str,
+        muter_id: str,
         course_id: str,
         scope: str = "personal",
         reason: str = "",
@@ -493,7 +493,7 @@ class AbstractBackend:
 
         Args:
             muted_user_id: ID of user to mute
-            muted_by_id: ID of user performing the mute
+            muter_id: ID of user performing the mute
             course_id: Course identifier
             scope: Mute scope ('personal' or 'course')
             reason: Optional reason for mute
@@ -510,7 +510,7 @@ class AbstractBackend:
         unmuted_by_id: str,
         course_id: str,
         scope: str = "personal",
-        muted_by_id: Optional[str] = None,
+        muter_id: Optional[str] = None,
         **kwargs: Any
     ) -> dict[str, Any]:
         """
@@ -521,7 +521,7 @@ class AbstractBackend:
             unmuted_by_id: ID of user performing the unmute
             course_id: Course identifier
             scope: Unmute scope ('personal' or 'course')
-            muted_by_id: Optional filter by original muter (for personal mutes)
+            muter_id: Optional filter by original muter (for personal mutes)
 
         Returns:
             Dictionary containing unmute operation result
@@ -590,39 +590,10 @@ class AbstractBackend:
         raise NotImplementedError
 
     @classmethod
-    def log_moderation_action(
-        cls,
-        action_type: str,
-        target_user_id: str,
-        moderator_id: str,
-        course_id: str,
-        scope: str = "personal",
-        reason: str = "",
-        metadata: Optional[dict[str, Any]] = None,
-        **kwargs: Any
-    ) -> dict[str, Any]:
-        """
-        Log a moderation action.
-
-        Args:
-            action_type: Type of action (mute, unmute, mute_and_report)
-            target_user_id: ID of the target user
-            moderator_id: ID of the moderating user
-            course_id: Course identifier
-            scope: Action scope
-            reason: Optional reason
-            metadata: Additional action metadata
-
-        Returns:
-            Dictionary containing log entry data
-        """
-        raise NotImplementedError
-
-    @classmethod
     def mute_and_report_user(
         cls,
         muted_user_id: str,
-        muted_by_id: str,
+        muter_id: str,
         course_id: str,
         scope: str = "personal",
         reason: str = "",
@@ -633,7 +604,7 @@ class AbstractBackend:
 
         Args:
             muted_user_id: ID of user to mute and report
-            muted_by_id: ID of user performing the action
+            muter_id: ID of user performing the action
             course_id: Course identifier
             scope: Mute scope ('personal' or 'course')
             reason: Reason for muting and reporting

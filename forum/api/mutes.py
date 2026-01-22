@@ -5,6 +5,7 @@ Native Python APIs for discussion moderation (mute/unmute).
 import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
+from django.http import HttpRequest
 
 from forum.backend import get_backend
 from forum.utils import ForumV2RequestError
@@ -14,7 +15,7 @@ log = logging.getLogger(__name__)
 
 def mute_user(
     muted_user_id: str,
-    muted_by_id: str,
+    muter_id: str,
     course_id: str,
     scope: str = "personal",
     reason: str = "",
@@ -25,7 +26,7 @@ def mute_user(
 
     Args:
         muted_user_id: ID of user to mute
-        muted_by_id: ID of user performing the mute
+        muter_id: ID of user performing the mute
         course_id: Course identifier
         scope: Mute scope ('personal' or 'course')
         reason: Optional reason for mute
@@ -37,7 +38,7 @@ def mute_user(
         backend = get_backend(course_id)()
         return backend.mute_user(
             muted_user_id=muted_user_id,
-            muted_by_id=muted_by_id,
+            muter_id=muter_id,
             course_id=course_id,
             scope=scope,
             reason=reason,
@@ -54,7 +55,7 @@ def unmute_user(
     unmuted_by_id: str,
     course_id: str,
     scope: str = "personal",
-    muted_by_id: Optional[str] = None,
+    muter_id: Optional[str] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """
@@ -65,7 +66,7 @@ def unmute_user(
         unmuted_by_id: ID of user performing the unmute
         course_id: Course identifier
         scope: Mute scope ('personal' or 'course')
-        muted_by_id: Optional filter by who performed the original mute
+        muter_id: Optional filter by who performed the original mute
 
     Returns:
         Dictionary containing unmute operation result
@@ -77,7 +78,7 @@ def unmute_user(
             unmuted_by_id=unmuted_by_id,
             course_id=course_id,
             scope=scope,
-            muted_by_id=muted_by_id,
+            muter_id=muter_id,
             **kwargs,
         )
     except ValueError as e:
@@ -115,13 +116,13 @@ def get_user_mute_status(
 
 
 def get_muted_users(
-    muted_by_id: str, course_id: str, scope: str = "all", **kwargs: Any
+    muter_id: str, course_id: str, scope: str = "all", **kwargs: Any
 ) -> list[dict[str, Any]]:
     """
     Get list of users muted by a specific user.
 
     Args:
-        muted_by_id: ID of the user who muted others
+        muter_id: ID of the user who muted others
         course_id: Course identifier
         scope: Scope filter ('personal', 'course', or 'all')
 
@@ -131,7 +132,7 @@ def get_muted_users(
     try:
         backend = get_backend(course_id)()
         return backend.get_muted_users(
-            moderator_id=muted_by_id, course_id=course_id, scope=scope, **kwargs
+            moderator_id=muter_id, course_id=course_id, scope=scope, **kwargs
         )
     except ValueError as e:
         raise ForumV2RequestError(str(e)) from e
@@ -139,15 +140,16 @@ def get_muted_users(
         raise ForumV2RequestError(f"Failed to get muted users: {str(e)}") from e
 
 
-def mute_and_report_user(  # pylint: disable=too-many-statements
+# pylint: disable=too-many-statements
+def mute_and_report_user(
     muted_user_id: str,
-    muted_by_id: str,
+    muter_id: str,
     course_id: str,
     scope: str = "personal",
     reason: str = "",
     thread_id: str = "",
     comment_id: str = "",
-    request=None,
+    request: Optional[HttpRequest] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """
@@ -155,13 +157,14 @@ def mute_and_report_user(  # pylint: disable=too-many-statements
 
     Args:
         muted_user_id: ID of user to mute
-        muted_by_id: ID of user performing the mute
+        muter_id: ID of user performing the mute
         course_id: Course identifier
         scope: Mute scope ('personal' or 'course')
         reason: Reason for muting and reporting
         thread_id: Optional thread ID to flag as abusive
         comment_id: Optional comment ID to flag as abusive
         request: Django request object for content flagging
+        **kwargs: Additional parameters to pass to backend.mute_user
 
     Returns:
         Dictionary containing mute and report operation result
@@ -172,7 +175,7 @@ def mute_and_report_user(  # pylint: disable=too-many-statements
         # Mute the user
         mute_result = backend.mute_user(
             muted_user_id=muted_user_id,
-            muted_by_id=muted_by_id,
+            muter_id=muter_id,
             course_id=course_id,
             scope=scope,
             reason=reason,
@@ -180,36 +183,23 @@ def mute_and_report_user(  # pylint: disable=too-many-statements
         )
 
         # Handle content flagging if thread_id or comment_id is provided
-        report_result = None
-        if (thread_id or comment_id) and request:
+        report_result: Dict[str, Any] = {}
+        if (thread_id or comment_id) and request:  # pylint: disable=broad-except
             try:
-                # pylint: disable=import-outside-toplevel,import-error
-                from lms.djangoapps.courseware.courses import get_course_with_access
-                from lms.djangoapps.discussion.django_comment_client.base.views import (
-                    track_discussion_reported_event,
-                )
-                from opaque_keys.edx.keys import CourseKey
-                from openedx.core.djangoapps.django_comment_common.comment_client.comment import (
-                    Comment,
-                )
-                from openedx.core.djangoapps.django_comment_common.comment_client.thread import (
-                    Thread,
-                )
+                backend = get_backend(course_id)()
 
-                course_key = CourseKey.from_string(course_id)
-                course = get_course_with_access(request.user, "load", course_key)
-
-                # Flag the content as abusive - try to determine if it's a thread or comment
-                content_type = None
-                content_id = None
+                # Flag the content as abusive using forum's backend
+                content_type: Optional[str] = None
+                content_id: Optional[str] = None
 
                 if thread_id:
-                    # First try as a thread
                     try:
-                        cc_thread = Thread(id=thread_id)
-                        cc_thread.retrieve()  # Verify it exists and is a thread
-                        cc_thread.flagAbuse(request.user, cc_thread)
-                        track_discussion_reported_event(request, course, cc_thread)
+                        # Try as thread first
+                        backend.flag_as_abuse(
+                            user_id=str(getattr(request.user, "id", "")),
+                            entity_id=thread_id,
+                            entity_type="CommentThread",
+                        )
                         content_type = "thread"
                         content_id = thread_id
                         report_result = {
@@ -220,14 +210,13 @@ def mute_and_report_user(  # pylint: disable=too-many-statements
                             "message": "Thread flagged as abusive",
                         }
                     except Exception:  # pylint: disable=broad-except
-                        # If thread fails, try as comment
                         try:
-                            cc_comment = Comment(
-                                id=thread_id
-                            )  # Use thread_id as comment_id
-                            cc_comment.retrieve()  # Verify it exists and is a comment
-                            cc_comment.flagAbuse(request.user, cc_comment)
-                            track_discussion_reported_event(request, course, cc_comment)
+                            # If thread fails, try as comment
+                            backend.flag_as_abuse(
+                                user_id=str(getattr(request.user, "id", "")),
+                                entity_id=thread_id,
+                                entity_type="Comment",
+                            )
                             content_type = "comment"
                             content_id = thread_id
                             report_result = {
@@ -244,15 +233,16 @@ def mute_and_report_user(  # pylint: disable=too-many-statements
                                 "content_id": thread_id,
                                 "error": str(e),
                                 "flagged": False,
-                                "message": "Mute successful, but content flagging failed - content may not exist",
+                                "message": "Mute successful, but content flagging failed",
                             }
 
                 elif comment_id:
                     try:
-                        cc_comment = Comment(id=comment_id)
-                        cc_comment.retrieve()  # Verify it exists
-                        cc_comment.flagAbuse(request.user, cc_comment)
-                        track_discussion_reported_event(request, course, cc_comment)
+                        backend.flag_as_abuse(
+                            user_id=str(getattr(request.user, "id", "")),
+                            entity_id=comment_id,
+                            entity_type="Comment",
+                        )
                         report_result = {
                             "status": "success",
                             "content_type": "comment",
@@ -278,12 +268,12 @@ def mute_and_report_user(  # pylint: disable=too-many-statements
                     "message": "Mute successful, but report system unavailable",
                 }
         else:
-            # Create a basic report record when no content ID is provided
+            # Basic report record when no content ID is provided
             report_result = {
                 "status": "success",
-                "report_id": f"report_{muted_user_id}_{muted_by_id}_{course_id}",
+                "report_id": f"report_{muted_user_id}_{muter_id}_{course_id}",
                 "reported_user_id": muted_user_id,
-                "reported_by_id": muted_by_id,
+                "reported_by_id": muter_id,
                 "course_id": course_id,
                 "reason": reason,
                 "created": datetime.utcnow().isoformat(),

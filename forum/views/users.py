@@ -222,7 +222,7 @@ class UserCourseStatsAPIView(APIView):
         )
         return Response(response, status=status.HTTP_200_OK)
 
-    def post(self, _request: Request, course_id: str) -> Response:
+    def post(self, request: Request, course_id: str) -> Response:
         """Update user stats for a course."""
         updated_users = update_users_in_course(course_id)
         return Response(updated_users, status=status.HTTP_200_OK)

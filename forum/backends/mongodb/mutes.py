@@ -21,7 +21,7 @@ class DiscussionMutes(MongoBaseModel):
         self,
         muted_user_id: str,
         course_id: str,
-        muted_by_id: Optional[str] = None,
+        muter_id: Optional[str] = None,
         scope: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -30,7 +30,7 @@ class DiscussionMutes(MongoBaseModel):
         Args:
             muted_user_id: ID of the muted user
             course_id: Course identifier
-            muted_by_id: ID of user who performed the mute (optional)
+            muter_id: ID of user who performed the mute (optional)
             scope: Scope filter (personal/course) (optional)
 
         Returns:
@@ -42,8 +42,8 @@ class DiscussionMutes(MongoBaseModel):
             "is_active": True,
         }
 
-        if muted_by_id:
-            query["muted_by_id"] = muted_by_id
+        if muter_id:
+            query["muter_id"] = muter_id
         if scope:
             query["scope"] = scope
 
@@ -54,7 +54,7 @@ class DiscussionMutes(MongoBaseModel):
     def create_mute(
         self,
         muted_user_id: str,
-        muted_by_id: str,
+        muter_id: str,
         course_id: str,
         scope: str = "personal",
         reason: str = "",
@@ -64,7 +64,7 @@ class DiscussionMutes(MongoBaseModel):
 
         Args:
             muted_user_id: ID of user to mute
-            muted_by_id: ID of user performing the mute
+            muter_id: ID of user performing the mute
             course_id: Course identifier
             scope: Mute scope ('personal' or 'course')
             reason: Optional reason for muting
@@ -76,7 +76,7 @@ class DiscussionMutes(MongoBaseModel):
         existing = self.get_active_mutes(
             muted_user_id=muted_user_id,
             course_id=course_id,
-            muted_by_id=muted_by_id if scope == "personal" else None,
+            muter_id=muter_id if scope == "personal" else None,
             scope=scope,
         )
 
@@ -86,7 +86,7 @@ class DiscussionMutes(MongoBaseModel):
         mute_doc = {
             "_id": ObjectId(),
             "muted_user_id": muted_user_id,
-            "muted_by_id": muted_by_id,
+            "muter_id": muter_id,
             "course_id": course_id,
             "scope": scope,
             "reason": reason,
@@ -111,7 +111,7 @@ class DiscussionMutes(MongoBaseModel):
         unmuted_by_id: str,
         course_id: str,
         scope: str = "personal",
-        muted_by_id: Optional[str] = None,
+        muter_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Deactivate (unmute) existing mute records.
@@ -121,7 +121,7 @@ class DiscussionMutes(MongoBaseModel):
             unmuted_by_id: ID of user performing the unmute
             course_id: Course identifier
             scope: Unmute scope ('personal' or 'course')
-            muted_by_id: Original muter ID (for personal unmutes)
+            muter_id: Original muter ID (for personal unmutes)
 
         Returns:
             Result of unmute operation
@@ -133,8 +133,8 @@ class DiscussionMutes(MongoBaseModel):
             "is_active": True,
         }
 
-        if scope == "personal" and muted_by_id:
-            query["muted_by_id"] = muted_by_id
+        if scope == "personal" and muter_id:
+            query["muter_id"] = muter_id
 
         update_doc = {
             "$set": {
@@ -178,7 +178,7 @@ class DiscussionMutes(MongoBaseModel):
         if scope == "personal":
             query["scope"] = "personal"
             if requester_id:
-                query["muted_by_id"] = requester_id
+                query["muter_id"] = requester_id
         elif scope == "course":
             query["scope"] = "course"
 
@@ -204,7 +204,7 @@ class DiscussionMutes(MongoBaseModel):
         personal_mutes = self.get_active_mutes(
             muted_user_id=user_id,
             course_id=course_id,
-            muted_by_id=viewer_id,
+            muter_id=viewer_id,
             scope="personal",
         )
 

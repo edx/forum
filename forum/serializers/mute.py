@@ -36,7 +36,7 @@ class MuteInputSerializer(serializers.Serializer[Dict[str, Any]]):
 class UnmuteInputSerializer(serializers.Serializer[Dict[str, Any]]):
     """Serializer for unmute input data."""
 
-    unmuter_id = serializers.CharField(
+    unmuted_by_id = serializers.CharField(
         required=True, help_text="ID of user performing the unmute action"
     )
     scope = serializers.ChoiceField(
@@ -44,7 +44,7 @@ class UnmuteInputSerializer(serializers.Serializer[Dict[str, Any]]):
         default=DiscussionMute.Scope.PERSONAL,
         help_text="Scope of the unmute (personal or course-wide)",
     )
-    muted_by_id = serializers.CharField(
+    muter_id = serializers.CharField(
         required=False,
         allow_blank=True,
         help_text="Original muter ID (for personal scope unmutes)",
@@ -94,7 +94,7 @@ class UserMuteStatusSerializer(serializers.Serializer[Dict[str, Any]]):
         allow_null=True,
         help_text="Scope of active mute (personal/course/null if not muted)",
     )
-    muted_by_id = serializers.CharField(
+    muter_id = serializers.CharField(
         allow_null=True, help_text="ID of user who muted this user (for personal mutes)"
     )
     muted_by_username = serializers.CharField(
@@ -126,7 +126,7 @@ class MutedUserSerializer(serializers.Serializer[Dict[str, Any]]):
 
     user_id = serializers.CharField(help_text="ID of the muted user")
     username = serializers.CharField(help_text="Username of the muted user")
-    muted_by_id = serializers.CharField(help_text="ID of user who performed the mute")
+    muter_id = serializers.CharField(help_text="ID of user who performed the mute")
     muted_by_username = serializers.CharField(
         help_text="Username of user who performed the mute"
     )
@@ -181,7 +181,7 @@ class DiscussionMuteSerializer(serializers.ModelSerializer[DiscussionMute]):
     muted_user_username = serializers.CharField(
         source="muted_user.username", read_only=True
     )
-    muted_by_id = serializers.CharField(source="muted_by.pk", read_only=True)
+    muter_id = serializers.CharField(source="muted_by.pk", read_only=True)
     muted_by_username = serializers.CharField(
         source="muted_by.username", read_only=True
     )
@@ -198,7 +198,7 @@ class DiscussionMuteSerializer(serializers.ModelSerializer[DiscussionMute]):
             "id",
             "muted_user_id",
             "muted_user_username",
-            "muted_by_id",
+            "muter_id",
             "muted_by_username",
             "unmuted_by_id",
             "unmuted_by_username",
