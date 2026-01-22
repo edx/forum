@@ -1652,7 +1652,6 @@ class MongoBackend(AbstractBackend):
     @staticmethod
     def soft_delete_thread(thread_id: str, deleted_by: Optional[str] = None) -> int:
         """Soft delete thread by marking it as deleted."""
-        Users().delete_read_state_by_thread_id(thread_id)
         return CommentThread().update(
             thread_id, is_deleted=True, deleted_at=datetime.now(), deleted_by=deleted_by
         )
