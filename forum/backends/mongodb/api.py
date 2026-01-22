@@ -1854,6 +1854,7 @@ class MongoBackend(AbstractBackend):
         ]
         return pipeline
 
+    # pylint: disable=E1121
     @classmethod
     def get_paginated_user_stats(
         cls, course_id: str, page: int, per_page: int, sort_criterion: dict[str, Any]

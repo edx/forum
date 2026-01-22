@@ -591,7 +591,7 @@ class MySQLBackend(AbstractBackend):
             return []
 
     # TODO: Make this function modular
-    # pylint: disable=too-many-statements
+    # pylint: disable=too-many-nested-blocks,too-many-statements
     @classmethod
     def handle_threads_query(
         cls,
@@ -1250,7 +1250,9 @@ class MySQLBackend(AbstractBackend):
 
     # Kept method signature same as mongo implementation
     @staticmethod
-    def retire_all_content(user_id: str, username: str) -> None:
+    def retire_all_content(
+        user_id: str, username: str
+    ) -> None:  # pylint: disable=W0613
         """Retire all content from user."""
         comments = Comment.objects.filter(author__pk=user_id)
         for comment in comments:
@@ -1776,7 +1778,6 @@ class MySQLBackend(AbstractBackend):
             }
         return commentable_counts
 
-    # pylint: disable=too-many-statements
     @staticmethod
     def update_comment(comment_id: str, **kwargs: Any) -> int:
         """Updates a comment in the database."""
@@ -2022,7 +2023,6 @@ class MySQLBackend(AbstractBackend):
         )
         return str(new_thread.pk)
 
-    # pylint: disable=too-many-statements
     @staticmethod
     def update_thread(
         thread_id: str,

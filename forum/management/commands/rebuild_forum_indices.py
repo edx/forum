@@ -56,6 +56,4 @@ class Command(BaseCommand):
         search_backend.rebuild_indices(
             batch_size=batch_size, extra_catchup_minutes=extra_catchup_minutes
         )
-        self.stdout.write(
-            self.style.SUCCESS("Forum indices rebuilt successfully.")
-        )  # pylint: disable=no-member
+        self.stdout.write(self.style.SUCCESS("Forum indices rebuilt successfully."))

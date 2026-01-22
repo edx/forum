@@ -3,21 +3,21 @@
 from django.contrib import admin
 
 from forum.models import (
-    AbuseFlagger,
-    Comment,
-    CommentThread,
+    ForumUser,
     CourseStat,
+    CommentThread,
+    Comment,
+    EditHistory,
+    AbuseFlagger,
+    HistoricalAbuseFlagger,
+    ReadState,
+    LastReadTime,
+    UserVote,
+    Subscription,
+    MongoContent,
+    ModerationAuditLog,
     DiscussionMute,
     DiscussionMuteException,
-    EditHistory,
-    ForumUser,
-    HistoricalAbuseFlagger,
-    LastReadTime,
-    ModerationAuditLog,
-    MongoContent,
-    ReadState,
-    Subscription,
-    UserVote,
 )
 
 

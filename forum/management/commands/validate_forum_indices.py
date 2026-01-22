@@ -23,6 +23,4 @@ class Command(BaseCommand):
         """
         search_backend = get_index_search_backend()
         search_backend.validate_indices()
-        self.stdout.write(
-            self.style.SUCCESS("Forum indices validated successfully.")
-        )  # pylint: disable=no-member
+        self.stdout.write(self.style.SUCCESS("Forum indices validated successfully."))

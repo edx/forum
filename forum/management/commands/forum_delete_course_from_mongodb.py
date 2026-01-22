@@ -32,9 +32,7 @@ class Command(BaseCommand):
 
         if dry_run:
             self.stdout.write(
-                self.style.WARNING(
-                    "Performing dry run. No data will be deleted."
-                )  # pylint: disable=no-member
+                self.style.WARNING("Performing dry run. No data will be deleted.")
             )
 
         if "all" in courses:
@@ -46,13 +44,9 @@ class Command(BaseCommand):
 
         if dry_run:
             self.stdout.write(
-                self.style.SUCCESS(
-                    "Dry run completed. No data was deleted."
-                )  # pylint: disable=no-member
+                self.style.SUCCESS("Dry run completed. No data was deleted.")
             )
         else:
             self.stdout.write(
-                self.style.SUCCESS(
-                    "Data deletion completed successfully"
-                )  # pylint: disable=no-member
+                self.style.SUCCESS("Data deletion completed successfully")
             )

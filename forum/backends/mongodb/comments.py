@@ -488,9 +488,9 @@ class Comment(BaseContents):
 
                 # Check if comment is anonymous
                 if not (comment.get("anonymous") or comment.get("anonymous_to_peers")):
-
-                    # pylint: disable=import-outside-toplevel
-                    from forum.backends.mongodb.api import MongoBackend
+                    from forum.backends.mongodb.api import (  # pylint: disable=import-outside-toplevel
+                        MongoBackend,
+                    )
 
                     if parent_comment_id:
                         # This is a reply - increment replies count and decrement deleted_replies
