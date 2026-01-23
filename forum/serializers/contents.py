@@ -78,9 +78,6 @@ class ContentSerializer(serializers.Serializer[dict[str, Any]]):
     closed = serializers.BooleanField(default=False)
     type = serializers.CharField()
     is_spam = serializers.BooleanField(default=False)
-    is_deleted = serializers.BooleanField(default=False)
-    deleted_at = CustomDateTimeField(allow_null=True, required=False)
-    deleted_by = serializers.CharField(allow_null=True, required=False)
 
     def create(self, validated_data: dict[str, Any]) -> Any:
         """Raise NotImplementedError"""

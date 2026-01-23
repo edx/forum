@@ -476,27 +476,3 @@ class AbstractBackend:
         Retrieve all threads and comments authored by a specific user.
         """
         raise NotImplementedError
-
-    @staticmethod
-    def get_deleted_threads_for_course(
-        course_id: str,
-        page: int = 1,
-        per_page: int = 20,
-        author_id: Optional[str] = None,
-    ) -> dict[str, Any]:
-        """
-        Get deleted threads for a specific course.
-        """
-        raise NotImplementedError
-
-    @staticmethod
-    def get_deleted_comments_for_course(
-        course_id: str,
-        page: int = 1,
-        per_page: int = 20,
-        author_id: Optional[str] = None,
-    ) -> dict[str, Any]:
-        """
-        Get deleted comments for a specific course.
-        """
-        raise NotImplementedError

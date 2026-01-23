@@ -96,9 +96,6 @@ def build_structure_and_response(
             "threads": 0,
             "responses": 0,
             "replies": 0,
-            "deleted_threads": 0,
-            "deleted_responses": 0,
-            "deleted_replies": 0,
         }
         for author in authors
     }
@@ -508,11 +505,8 @@ def test_handles_deleting_replies(
     # Thread count should stay the same
     assert new_stats is not None
     assert new_stats["threads"] == stats["threads"]
-    # Deleting a reply decrements either responses or replies (backend-specific)
-    # Total comment count (responses + replies) should decrease by 1
-    assert (new_stats["responses"] + new_stats["replies"]) == (
-        stats["responses"] + stats["replies"] - 1
-    )
+    assert new_stats["responses"] == stats["responses"]
+    assert new_stats["replies"] == stats["replies"] - 1
 
 
 def test_handles_removing_flags(

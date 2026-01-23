@@ -8,8 +8,8 @@ from rest_framework.serializers import ValidationError
 from rest_framework.views import APIView
 
 from forum.api import (
-    create_child_comment,
     create_parent_comment,
+    create_child_comment,
     delete_comment,
     get_parent_comment,
     update_comment,
@@ -142,7 +142,7 @@ class CommentsAPIView(APIView):
             request (Request): The incoming request.
             comment_id: The ID of the comment to be deleted.
         Body:
-            deleted_by: Optional ID of the user performing the delete (defaults to authenticated user).
+            Empty.
         Response:
             The details of the comment that is deleted.
         """
