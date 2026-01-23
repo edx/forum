@@ -224,12 +224,9 @@ def test_delete_thread(api_client: APIClient, patched_get_backend: Any) -> None:
     assert thread_from_db["comment_count"] == 2
     response = api_client.delete_json(f"/api/v2/threads/{thread_id}")
     assert response.status_code == 200
-    thread = backend.get_thread(thread_id)
-    comment_1 = backend.get_comment(comment_id_1)
-    comment_2 = backend.get_comment(comment_id_2)
-    assert thread is None or thread.get("is_deleted", False) is True
-    assert comment_1 is None or comment_1.get("is_deleted", False) is True
-    assert comment_2 is None or comment_2.get("is_deleted", False) is True
+    assert backend.get_thread(thread_id) is None
+    assert backend.get_comment(comment_id_1) is None
+    assert backend.get_comment(comment_id_2) is None
     assert backend.get_subscription(subscriber_id=user_id, source_id=thread_id) is None
 
 
@@ -857,6 +854,46 @@ def test_response_for_thread_type_question(
     assert thread["non_endorsed_resp_total"] == 1
 
 
+def test_read_states_deletion_of_a_thread_on_thread_deletion(
+    api_client: APIClient, patched_mongo_backend: MongoBackend
+) -> None:
+    """Test delete read_states of the thread on deletion of a thread for mongodb."""
+    user_id, thread_id = setup_models(backend=patched_mongo_backend)
+    comment_id_1, comment_id_2 = create_comments_in_a_thread(
+        patched_mongo_backend, thread_id
+    )
+    thread_from_db = patched_mongo_backend.get_thread(thread_id)
+    assert thread_from_db is not None
+    assert thread_from_db["comment_count"] == 2
+    get_thread_response = api_client.get_json(
+        f"/api/v2/threads/{thread_id}",
+        params={
+            "recursive": False,
+            "with_responses": True,
+            "user_id": int(user_id),
+            "mark_as_read": False,
+            "resp_skip": 0,
+            "resp_limit": 10,
+            "reverse_order": "true",
+            "merge_question_type_responses": False,
+        },
+    )  # call get_thread API to save read_states of this thread in user model
+    assert get_thread_response.status_code == 200
+    assert is_thread_id_exists_in_user_read_state(user_id, thread_id) is True
+    response = api_client.delete_json(f"/api/v2/threads/{thread_id}")
+    assert response.status_code == 200
+    assert patched_mongo_backend.get_thread(thread_id) is None
+    assert patched_mongo_backend.get_comment(comment_id_1) is None
+    assert patched_mongo_backend.get_comment(comment_id_2) is None
+    assert (
+        patched_mongo_backend.get_subscription(
+            subscriber_id=user_id, source_id=thread_id
+        )
+        is None
+    )
+    assert is_thread_id_exists_in_user_read_state(user_id, thread_id) is False
+
+
 def is_thread_id_exists_in_user_read_state(user_id: str, thread_id: str) -> bool:
     """Return True or False if thread_id exists in read_states of any user."""
     user = Users().find_one({"_id": user_id})
@@ -1015,12 +1052,9 @@ def test_read_states_deletion_on_thread_deletion_without_read_states(
 
     response = api_client.delete_json(f"/api/v2/threads/{thread_id}")
     assert response.status_code == 200
-    thread = patched_mongo_backend.get_thread(thread_id)
-    comment_1 = patched_mongo_backend.get_comment(comment_id_1)
-    comment_2 = patched_mongo_backend.get_comment(comment_id_2)
-    assert thread is None or thread.get("is_deleted", False) is True
-    assert comment_1 is None or comment_1.get("is_deleted", False) is True
-    assert comment_2 is None or comment_2.get("is_deleted", False) is True
+    assert patched_mongo_backend.get_thread(thread_id) is None
+    assert patched_mongo_backend.get_comment(comment_id_1) is None
+    assert patched_mongo_backend.get_comment(comment_id_2) is None
     assert (
         patched_mongo_backend.get_subscription(
             subscriber_id=user_id, source_id=thread_id
@@ -1028,6 +1062,59 @@ def test_read_states_deletion_on_thread_deletion_without_read_states(
         is None
     )
     assert is_thread_id_exists_in_user_read_state(user_id, thread_id) is False
+
+
+def test_read_states_deletion_on_thread_deletion_with_multiple_read_states(
+    api_client: APIClient, patched_mongo_backend: MongoBackend
+) -> None:
+    """Test delete read_states of the thread on deletion of a thread when there are multiple read states."""
+    # Setup first thread and read state
+    user_id_1, thread_id_1 = setup_models(backend=patched_mongo_backend)
+    get_thread_response = api_client.get_json(
+        f"/api/v2/threads/{thread_id_1}",
+        params={
+            "recursive": False,
+            "with_responses": True,
+            "user_id": int(user_id_1),
+            "mark_as_read": True,
+            "resp_skip": 0,
+            "resp_limit": 10,
+            "reverse_order": "true",
+            "merge_question_type_responses": False,
+        },
+    )
+    assert get_thread_response.status_code == 200
+    assert is_thread_id_exists_in_user_read_state(user_id_1, thread_id_1) is True
+
+    # Setup second thread and read state
+    user_id_2, thread_id_2 = setup_models(
+        backend=patched_mongo_backend,
+        user_id="2",
+        username="user2",
+        course_id="course2",
+    )
+    get_thread_response = api_client.get_json(
+        f"/api/v2/threads/{thread_id_2}",
+        params={
+            "recursive": False,
+            "with_responses": True,
+            "user_id": int(user_id_2),
+            "mark_as_read": True,
+            "resp_skip": 0,
+            "resp_limit": 10,
+            "reverse_order": "true",
+            "merge_question_type_responses": False,
+        },
+    )
+    assert get_thread_response.status_code == 200
+    assert is_thread_id_exists_in_user_read_state(user_id_2, thread_id_2) is True
+
+    # Delete first thread and verify its read state is removed while second remains
+    response = api_client.delete_json(f"/api/v2/threads/{thread_id_1}")
+    assert response.status_code == 200
+    assert patched_mongo_backend.get_thread(thread_id_1) is None
+    assert is_thread_id_exists_in_user_read_state(user_id_1, thread_id_1) is False
+    assert is_thread_id_exists_in_user_read_state(user_id_2, thread_id_2) is True
 
 
 def test_read_states_deletion_checks_thread_id_existence(
