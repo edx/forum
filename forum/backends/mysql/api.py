@@ -10,8 +10,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.paginator import Paginator
 from django.db.models import (
-    Count,
     Case,
+    Count,
     Exists,
     F,
     IntegerField,
@@ -19,8 +19,8 @@ from django.db.models import (
     OuterRef,
     Q,
     Subquery,
-    When,
     Sum,
+    When,
 )
 from django.utils import timezone
 from rest_framework import status
@@ -62,6 +62,9 @@ class MySQLBackend(AbstractBackend):
             course_stat.threads = 0
             course_stat.responses = 0
             course_stat.replies = 0
+            course_stat.deleted_threads = 0
+            course_stat.deleted_responses = 0
+            course_stat.deleted_replies = 0
 
         for key, value in kwargs.items():
             if hasattr(course_stat, key):
@@ -608,6 +611,7 @@ class MySQLBackend(AbstractBackend):
         raw_query: bool = False,
         commentable_ids: Optional[list[str]] = None,
         is_moderator: bool = False,
+        is_deleted: bool = False,
     ) -> dict[str, Any]:
         """
         Handles complex thread queries based on various filters and returns paginated results.
@@ -653,7 +657,7 @@ class MySQLBackend(AbstractBackend):
                 raise ValueError("User does not exist") from exc
         # Base query
         base_query = CommentThread.objects.filter(
-            pk__in=mysql_comment_thread_ids, context=context
+            pk__in=mysql_comment_thread_ids, context=context, is_deleted=is_deleted
         )
 
         # Group filtering
@@ -985,6 +989,34 @@ class MySQLBackend(AbstractBackend):
     def delete_comments_of_a_thread(thread_id: str) -> None:
         """Delete comments of a thread."""
         Comment.objects.filter(comment_thread__pk=thread_id, parent=None).delete()
+
+    @staticmethod
+    def soft_delete_comments_of_a_thread(
+        thread_id: str, deleted_by: Optional[str] = None
+    ) -> tuple[int, int]:
+        """Soft delete comments of a thread by marking them as deleted.
+
+        Returns:
+            tuple: (responses_deleted, replies_deleted)
+        """
+        count_of_replies_deleted = 0
+        # Only soft-delete responses (parent comments) that aren't already deleted
+        count_of_response_deleted = Comment.objects.filter(
+            comment_thread__pk=thread_id,
+            parent=None,
+            is_deleted=False,  # Only update non-deleted comments
+        ).update(is_deleted=True, deleted_at=timezone.now(), deleted_by=deleted_by)
+
+        # Soft-delete child comments (replies) of each response
+        for comment in Comment.objects.filter(
+            comment_thread__pk=thread_id, parent=None, is_deleted=True
+        ):
+            child_comments = Comment.objects.filter(parent=comment, is_deleted=False)
+            count_of_replies_deleted += child_comments.update(
+                is_deleted=True, deleted_at=timezone.now(), deleted_by=deleted_by
+            )
+
+        return count_of_response_deleted, count_of_replies_deleted
 
     @classmethod
     def delete_subscriptions_of_a_thread(cls, thread_id: str) -> None:
@@ -1373,10 +1405,18 @@ class MySQLBackend(AbstractBackend):
             comments_updated_at or timezone.now() - timedelta(days=365 * 100),
         )
 
+        # Count deleted content
+        deleted_threads = threads.filter(is_deleted=True).count()
+        deleted_responses = responses.filter(is_deleted=True).count()
+        deleted_replies = replies.filter(is_deleted=True).count()
+
         stats, _ = CourseStat.objects.get_or_create(user=author, course_id=course_id)
-        stats.threads = threads.count()
-        stats.responses = responses.count()
-        stats.replies = replies.count()
+        stats.threads = threads.count() - deleted_threads
+        stats.responses = responses.count() - deleted_responses
+        stats.replies = replies.count() - deleted_replies
+        stats.deleted_threads = deleted_threads
+        stats.deleted_responses = deleted_responses
+        stats.deleted_replies = deleted_replies
         stats.active_flags = active_flags
         stats.inactive_flags = inactive_flags
         stats.last_activity_at = updated_at
@@ -1450,7 +1490,9 @@ class MySQLBackend(AbstractBackend):
     def get_comment(comment_id: str) -> dict[str, Any] | None:
         """Return comment from comment_id."""
         try:
-            comment = Comment.objects.get(pk=comment_id)
+            comment = Comment.objects.get(
+                pk=comment_id, is_deleted=False
+            )  # Exclude soft deleted comments
         except Comment.DoesNotExist:
             return None
         return comment.to_dict()
@@ -1529,6 +1571,179 @@ class MySQLBackend(AbstractBackend):
             cls.update_child_count_in_parent_comment(str(comment.parent.pk), -1)
 
         comment.delete()
+
+    @staticmethod
+    def soft_delete_comment(
+        comment_id: str, deleted_by: Optional[str] = None
+    ) -> tuple[int, int]:
+        """Soft delete comment by marking it as deleted.
+
+        Returns:
+            tuple: (responses_deleted, replies_deleted)
+        """
+        comment = Comment.objects.get(pk=comment_id)
+        deleted_user: Optional[User] = None
+        if deleted_by:
+            try:
+                deleted_user = User.objects.get(pk=int(deleted_by))
+            except (User.DoesNotExist, ValueError):
+                deleted_user = None
+
+        # If this is a reply (has a parent) -> mark reply deleted
+        # Note: We don't decrement child_count on soft delete (matches MongoDB behavior)
+        if comment.parent:
+            comment.is_deleted = True
+            comment.deleted_at = timezone.now()
+            comment.deleted_by = deleted_user  # type: ignore[assignment]
+            comment.save()
+            # replies_deleted = 1 (one reply), responses_deleted = 0
+            return 0, 1
+
+        # Else: this is a parent/response comment. Soft-delete it and all its undeleted children.
+        # Mark parent deleted
+        comment.is_deleted = True
+        comment.deleted_at = timezone.now()
+        comment.deleted_by = deleted_user  # type: ignore[assignment]
+        comment.save()
+
+        # Soft-delete child replies that are not already deleted
+        child_qs = Comment.objects.filter(parent=comment, is_deleted=False)
+        replies_deleted = 0
+        if child_qs.exists():
+            replies_deleted = child_qs.update(
+                is_deleted=True,
+                deleted_at=timezone.now(),
+                deleted_by=deleted_user,
+            )
+        # responses_deleted = 1 (the parent), replies_deleted = number updated
+        return 1, int(replies_deleted)
+
+    @classmethod
+    def restore_comment(
+        cls,
+        comment_id: str,
+        restored_by: Optional[str] = None,  # pylint: disable=unused-argument
+    ) -> bool:
+        """Restore a soft-deleted comment and update stats."""
+        try:
+            comment = Comment.objects.get(pk=comment_id, is_deleted=True)
+
+            # Get comment metadata before restoring
+            author_id = str(comment.author.pk)
+            course_id = comment.course_id
+            is_reply = comment.parent is not None
+            is_anonymous = comment.anonymous or comment.anonymous_to_peers
+
+            # Restore the comment
+            comment.is_deleted = False
+            comment.deleted_at = None
+            comment.deleted_by = None  # type: ignore[assignment]
+            comment.save()
+
+            # Update user course stats (only if not anonymous)
+            if not is_anonymous:
+                if is_reply:
+                    # This is a reply - increment replies, decrement deleted_replies
+                    cls.update_stats_for_course(
+                        author_id, course_id, replies=1, deleted_replies=-1
+                    )
+                else:
+                    # This is a response - increment responses, decrement deleted_responses
+                    # Count ONLY children that are STILL DELETED (not already restored separately)
+                    deleted_child_count = Comment.objects.filter(
+                        parent=comment, is_deleted=True
+                    ).count()
+
+                    cls.update_stats_for_course(
+                        author_id,
+                        course_id,
+                        responses=1,
+                        deleted_responses=-1,
+                        replies=deleted_child_count,
+                        deleted_replies=-deleted_child_count,
+                    )
+
+            return True
+        except ObjectDoesNotExist:
+            return False
+
+    @classmethod
+    def restore_thread(
+        cls,
+        thread_id: str,
+        restored_by: Optional[str] = None,  # pylint: disable=unused-argument
+    ) -> bool:
+        """Restore a soft-deleted thread and update stats."""
+        try:
+            thread = CommentThread.objects.get(pk=thread_id, is_deleted=True)
+
+            # Get thread metadata before restoring
+            author_id = str(thread.author.pk)
+            course_id = thread.course_id
+            is_anonymous = thread.anonymous or thread.anonymous_to_peers
+
+            # Restore the thread
+            thread.is_deleted = False
+            thread.deleted_at = None
+            thread.deleted_by = None  # type: ignore[assignment]
+            thread.save()
+
+            # Update user course stats (only if not anonymous)
+            if not is_anonymous:
+                cls.update_stats_for_course(
+                    author_id, course_id, threads=1, deleted_threads=-1
+                )
+
+            return True
+        except ObjectDoesNotExist:
+            return False
+
+    @classmethod
+    def restore_user_deleted_comments(
+        cls, user_id: str, course_ids: list[str], restored_by: Optional[str] = None
+    ) -> int:
+        """Restore all deleted comments for a user in given courses and update stats."""
+        # Get all deleted comments for this user
+        deleted_comments = Comment.objects.filter(
+            author_id=user_id, course_id__in=course_ids, is_deleted=True
+        )
+
+        count = 0
+
+        # IMPORTANT: Restore replies (children) FIRST, then responses (parents)
+        # This prevents double-counting replies when both parent and children are restored
+
+        # First, restore all replies (comments with a parent)
+        replies = [c for c in deleted_comments if c.parent is not None]
+        for comment in replies:
+            if cls.restore_comment(str(comment.pk), restored_by=restored_by):
+                count += 1
+
+        # Then, restore all responses (comments without a parent)
+        responses = [c for c in deleted_comments if c.parent is None]
+        for comment in responses:
+            if cls.restore_comment(str(comment.pk), restored_by=restored_by):
+                count += 1
+
+        return count
+
+    @classmethod
+    def restore_user_deleted_threads(
+        cls, user_id: str, course_ids: list[str], restored_by: Optional[str] = None
+    ) -> int:
+        """Restore all deleted threads for a user in given courses and update stats."""
+        # Get all deleted threads for this user
+        deleted_threads = CommentThread.objects.filter(
+            author_id=user_id, course_id__in=course_ids, is_deleted=True
+        )
+
+        count = 0
+        # Restore each thread individually to properly update stats
+        for thread in deleted_threads:
+            if cls.restore_thread(str(thread.pk), restored_by=restored_by):
+                count += 1
+
+        return count
 
     @staticmethod
     def get_commentables_counts_based_on_type(course_id: str) -> dict[str, Any]:
@@ -1772,6 +1987,20 @@ class MySQLBackend(AbstractBackend):
         return 1
 
     @staticmethod
+    def soft_delete_thread(thread_id: str, deleted_by: Optional[str] = None) -> int:
+        """Soft delete thread by marking it as deleted."""
+        try:
+            thread = CommentThread.objects.get(pk=thread_id)
+        except ObjectDoesNotExist:
+            return 0
+        thread.is_deleted = True
+        thread.deleted_at = timezone.now()
+        if deleted_by:
+            thread.deleted_by = User.objects.get(pk=int(deleted_by))
+        thread.save()
+        return 1
+
+    @staticmethod
     def create_thread(data: dict[str, Any]) -> str:
         """Create thread."""
         optional_args = {}
@@ -1911,14 +2140,19 @@ class MySQLBackend(AbstractBackend):
     @staticmethod
     def get_user_thread_filter(course_id: str) -> dict[str, Any]:
         """Get user thread filter"""
-        return {"course_id": course_id}
+        return {
+            "course_id": course_id,
+            "is_deleted": False,
+        }  # Exclude soft deleted threads
 
     @staticmethod
     def get_filtered_threads(
         query: dict[str, Any], ids_only: bool = False
     ) -> list[dict[str, Any]]:
         """Return a list of threads that match the given filter."""
-        threads = CommentThread.objects.filter(**query)
+        threads = CommentThread.objects.filter(**query).filter(
+            is_deleted=False
+        )  # Exclude soft deleted threads
         if ids_only:
             return [{"_id": str(thread.pk)} for thread in threads]
         return [thread.to_dict() for thread in threads]
@@ -2107,6 +2341,12 @@ class MySQLBackend(AbstractBackend):
             }
         elif sort_by == "recency":
             return {"course_stats__last_activity_at": -1, "username": -1}
+        elif sort_by == "deleted":
+            # Sort by total deleted count (sum of threads + responses + replies)
+            return {
+                "deleted_count": -1,
+                "username": -1,
+            }
         else:
             return {
                 "course_stats__threads": -1,
@@ -2120,10 +2360,20 @@ class MySQLBackend(AbstractBackend):
         cls, course_id: str, page: int, per_page: int, sort_criterion: dict[str, Any]
     ) -> dict[str, Any]:
         """Get paginated user stats."""
-        users = User.objects.filter(
+        users_query = User.objects.filter(
             Q(course_stats__course_id=course_id)
             & Q(course_stats__course_id__isnull=False)
-        ).order_by(
+        )
+
+        # If sorting by deleted_count, annotate with computed field
+        if "deleted_count" in sort_criterion:
+            users_query = users_query.annotate(
+                deleted_count=F("course_stats__deleted_threads")
+                + F("course_stats__deleted_responses")
+                + F("course_stats__deleted_replies")
+            )
+
+        users = users_query.order_by(
             *[f"-{key}" for key, value in sort_criterion.items() if value == -1],
             *[key for key, value in sort_criterion.items() if value == 1],
         )
@@ -2158,8 +2408,14 @@ class MySQLBackend(AbstractBackend):
             key: value for key, value in kwargs.items() if hasattr(CommentThread, key)
         }
 
-        comments = Comment.objects.filter(**comment_filters)
-        threads = CommentThread.objects.filter(**thread_filters)
+        comments = Comment.objects.filter(**comment_filters).filter(
+            is_deleted=False,  # Exclude soft deleted comments
+            comment_thread__is_deleted=False,  # Exclude comments on deleted threads
+        )
+        # Exclude soft deleted threads
+        threads = CommentThread.objects.filter(**thread_filters).filter(
+            is_deleted=False
+        )
 
         sort_key = kwargs.get("sort_key")
         if sort_key:
@@ -2255,3 +2511,57 @@ class MySQLBackend(AbstractBackend):
             return cls.update_thread(content_id, **update_data)
         else:
             return cls.update_comment(content_id, **update_data)
+
+    @staticmethod
+    def get_deleted_threads_for_course(
+        course_id: str,
+        page: int = 1,
+        per_page: int = 20,
+        author_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Get deleted threads for a course."""
+        query = CommentThread.objects.filter(
+            course_id=course_id, is_deleted=True, author__username=author_id
+        ).order_by("-deleted_at")
+
+        total_count = query.count()
+        paginator = Paginator(query, per_page)
+        page_obj = paginator.page(page)
+        threads = [thread.to_dict() for thread in page_obj.object_list]
+
+        return {
+            "threads": threads,
+            "total_count": total_count,
+            "page": page,
+            "per_page": per_page,
+        }
+
+    @staticmethod
+    def get_deleted_comments_for_course(
+        course_id: str,
+        page: int = 1,
+        per_page: int = 20,
+        author_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Get deleted comments for a course."""
+        query = Comment.objects.filter(
+            course_id=course_id, is_deleted=True, author__username=author_id
+        ).order_by("-deleted_at")
+
+        # Get total count
+        total_count = query.count()
+
+        # Get paginated results
+        paginator = Paginator(query, per_page)
+        try:
+            page_obj = paginator.page(page)
+            comments = [comment.to_dict() for comment in page_obj.object_list]
+        except Exception:  # pylint: disable=broad-exception-caught
+            comments = []
+
+        return {
+            "comments": comments,
+            "total_count": total_count,
+            "page": page,
+            "per_page": per_page,
+        }
