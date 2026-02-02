@@ -466,7 +466,9 @@ class TestGetBannedUsernamesAPI:
             reason="Test",
         )
 
-        usernames = forum_api.get_banned_usernames(course_id=test_course_keys["course1"])
+        usernames = forum_api.get_banned_usernames(
+            course_id=test_course_keys["course1"]
+        )
 
         assert isinstance(usernames, set)
         assert "learner" in usernames

@@ -66,8 +66,8 @@ class BanUserAPIView(APIView):
         try:
             validated_data = serializer.validated_data.copy()
             # Convert user IDs to User objects
-            user_id = validated_data.pop('user_id')
-            banned_by_id = validated_data.pop('banned_by_id')
+            user_id = validated_data.pop("user_id")
+            banned_by_id = validated_data.pop("banned_by_id")
             user = User.objects.get(id=user_id)
             banned_by = User.objects.get(id=banned_by_id)
 
@@ -122,10 +122,12 @@ class UnbanUserAPIView(APIView):
         try:
             validated_data = serializer.validated_data.copy()
             # Convert unbanned_by_id to User object
-            unbanned_by_id = validated_data.pop('unbanned_by_id')
+            unbanned_by_id = validated_data.pop("unbanned_by_id")
             unbanned_by = User.objects.get(id=unbanned_by_id)
 
-            unban_data = unban_user(ban_id=ban_id, unbanned_by=unbanned_by, **validated_data)
+            unban_data = unban_user(
+                ban_id=ban_id, unbanned_by=unbanned_by, **validated_data
+            )
             return Response(unban_data, status=status.HTTP_200_OK)
         except ValueError as e:
             if "not found" in str(e).lower():

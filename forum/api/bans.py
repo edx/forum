@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from django.contrib.auth import get_user_model
 from django.db import models, transaction
+from django.db.models import Q
 from django.utils import timezone
 from opaque_keys.edx.keys import CourseKey
 
@@ -73,7 +74,9 @@ def ban_user(
                 org_key = str(course_key.org) if hasattr(course_key, "org") else None
 
             if not org_key:
-                raise ValueError("org_key could not be determined for organization-level ban")
+                raise ValueError(
+                    "org_key could not be determined for organization-level ban"
+                )
 
             lookup_kwargs = {
                 "user": banned_user,
@@ -208,12 +211,18 @@ def unban_user(
         # For course-level bans, include course_id
         # For org-level bans, course_id is NULL in DB
         if scope == "course" and course_id:
-            course_key = CourseKey.from_string(course_id) if isinstance(course_id, str) else course_id
+            course_key = (
+                CourseKey.from_string(course_id)
+                if isinstance(course_id, str)
+                else course_id
+            )
             query["course_id"] = course_key
         try:
             ban = DiscussionBan.objects.get(**query)
         except DiscussionBan.DoesNotExist as exc:
-            raise ValueError(f"No active ban found for user {user.username} with scope {scope}") from exc
+            raise ValueError(
+                f"No active ban found for user {user.username} with scope {scope}"
+            ) from exc
     else:
         raise ValueError("Either ban_id or user must be provided")
 
@@ -224,7 +233,11 @@ def unban_user(
     with transaction.atomic():
         # For org-level bans with course_id: create exception instead of full unban
         if ban.scope == "organization" and course_id:
-            course_key = CourseKey.from_string(course_id) if isinstance(course_id, str) else course_id
+            course_key = (
+                CourseKey.from_string(course_id)
+                if isinstance(course_id, str)
+                else course_id
+            )
 
             # Create exception for this specific course
             exception, created = DiscussionBanException.objects.get_or_create(
@@ -356,13 +369,18 @@ def get_banned_users(
         queryset = queryset.filter(scope=scope)
 
     if course_id:
-        course_key = CourseKey.from_string(course_id) if isinstance(course_id, str) else course_id
+        course_key = (
+            CourseKey.from_string(course_id)
+            if isinstance(course_id, str)
+            else course_id
+        )
         # Include both course-level bans and org-level bans for this course's org unless scope is specified
         if not scope:
             org = str(course_key.org) if hasattr(course_key, "org") else None
             if org:
                 queryset = queryset.filter(
-                    models.Q(course_id=course_key) | models.Q(org_key=org, scope="organization")
+                    models.Q(course_id=course_key)
+                    | models.Q(org_key=org, scope="organization")
                 )
             else:
                 # Fallback to just course-level bans if can't extract org
@@ -381,10 +399,7 @@ def get_banned_users(
 
 
 def get_ban(
-    ban_id: int = None,
-    user=None,
-    course_id: Optional[str] = None,
-    scope: str = None
+    ban_id: int = None, user=None, course_id: Optional[str] = None, scope: str = None
 ) -> Optional[Dict[str, Any]]:
     """
     Get a specific ban by ID or by user/course/scope.
@@ -403,17 +418,23 @@ def get_ban(
     """
     try:
         if ban_id:
-            ban = DiscussionBan.objects.select_related("user", "banned_by", "unbanned_by").get(
-                id=ban_id
-            )
+            ban = DiscussionBan.objects.select_related(
+                "user", "banned_by", "unbanned_by"
+            ).get(id=ban_id)
         elif user:
             query = {"user": user, "is_active": True}
             if scope:
                 query["scope"] = scope
             if course_id:
-                course_key = CourseKey.from_string(course_id) if isinstance(course_id, str) else course_id
+                course_key = (
+                    CourseKey.from_string(course_id)
+                    if isinstance(course_id, str)
+                    else course_id
+                )
                 query["course_id"] = course_key
-            ban = DiscussionBan.objects.select_related("user", "banned_by", "unbanned_by").get(**query)
+            ban = DiscussionBan.objects.select_related(
+                "user", "banned_by", "unbanned_by"
+            ).get(**query)
         else:
             raise ValueError("Either ban_id or user must be provided")
         return _serialize_ban(ban)
@@ -500,6 +521,7 @@ def get_user_ban_scope(user, course_id):
         from openedx.core.djangoapps.content.course_overviews.models import (
             CourseOverview,
         )
+
         course = CourseOverview.objects.get(id=course_id)
         org_name = course.org
     except (ImportError, Exception):  # pylint: disable=broad-exception-caught
@@ -552,8 +574,6 @@ def get_banned_usernames(course_id=None, org_key=None):
     Returns:
         set: Set of banned usernames
     """
-    from django.db.models import Q
-
     queryset = DiscussionBan.objects.filter(is_active=True)
 
     if course_id:
