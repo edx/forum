@@ -47,7 +47,7 @@ class Migration(migrations.Migration):
     """Migration to add discussion ban and moderation models."""
 
     dependencies = [
-        ("forum", "0005_moderationauditlog_comment_is_spam_and_more"),
+        ("forum", "0006_comment_deleted_at_comment_deleted_by_and_more"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

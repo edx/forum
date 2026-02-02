@@ -616,4 +616,3 @@ def create_audit_log(
         reasoning="",
         moderator_override=False,
     )
-    return dict(log.__dict__)

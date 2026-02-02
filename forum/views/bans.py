@@ -64,7 +64,14 @@ class BanUserAPIView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            ban_data = ban_user(**serializer.validated_data)
+            validated_data = serializer.validated_data.copy()
+            # Convert user IDs to User objects
+            user_id = validated_data.pop('user_id')
+            banned_by_id = validated_data.pop('banned_by_id')
+            user = User.objects.get(id=user_id)
+            banned_by = User.objects.get(id=banned_by_id)
+
+            ban_data = ban_user(user=user, banned_by=banned_by, **validated_data)
             return Response(ban_data, status=status.HTTP_201_CREATED)
         except (ValueError, TypeError) as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -113,7 +120,12 @@ class UnbanUserAPIView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            unban_data = unban_user(ban_id=ban_id, **serializer.validated_data)
+            validated_data = serializer.validated_data.copy()
+            # Convert unbanned_by_id to User object
+            unbanned_by_id = validated_data.pop('unbanned_by_id')
+            unbanned_by = User.objects.get(id=unbanned_by_id)
+
+            unban_data = unban_user(ban_id=ban_id, unbanned_by=unbanned_by, **validated_data)
             return Response(unban_data, status=status.HTTP_200_OK)
         except ValueError as e:
             if "not found" in str(e).lower():
@@ -218,12 +230,12 @@ class BanDetailAPIView(APIView):
         """Get details of a specific ban."""
         try:
             ban_data = get_ban(ban_id)
+            if ban_data is None:
+                return Response(
+                    {"error": f"Ban with id {ban_id} not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
             return Response(ban_data, status=status.HTTP_200_OK)
-        except DiscussionBan.DoesNotExist:
-            return Response(
-                {"error": f"Ban with id {ban_id} not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
         except (ValueError, TypeError) as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:  # pylint: disable=broad-exception-caught
