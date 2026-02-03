@@ -2523,6 +2523,7 @@ class MySQLBackend(AbstractBackend):
         course_id: str,
         scope: str = "personal",
         reason: str = "",
+        requester_is_privileged: bool = False,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """
@@ -2534,6 +2535,7 @@ class MySQLBackend(AbstractBackend):
             course_id: Course identifier
             scope: Mute scope ('personal' or 'course')
             reason: Optional reason for mute
+            requester_is_privileged: Whether requester has course-level privileges
 
         Returns:
             Dictionary containing mute record data
@@ -2549,6 +2551,12 @@ class MySQLBackend(AbstractBackend):
             # Prevent learners from muting staff
             if muted_user.is_staff and not muted_by_user.is_staff:
                 raise ValidationError("Learners cannot mute staff users")
+
+            # Only privileged users (staff, instructor, TA, etc.) can create course-wide mutes
+            # Check requester_is_privileged flag or fall back to is_staff check
+            is_privileged = requester_is_privileged or muted_by_user.is_staff
+            if scope == DiscussionMute.Scope.COURSE and not is_privileged:
+                raise ValidationError("Only staff can create course-wide mutes")
 
             # Check if mute already exists
             existing_mute = DiscussionMute.objects.filter(
@@ -2750,28 +2758,58 @@ class MySQLBackend(AbstractBackend):
         course_id: str,
         requester_id: Optional[str] = None,
         scope: str = "all",
+        requester_is_privileged: bool = False,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """
-        Get all muted users in a course.
+        Get all muted users in a course with role-based filtering.
 
         Args:
             course_id: Course identifier
             requester_id: ID of user requesting the list
             scope: Scope filter ('personal', 'course', or 'all')
+            requester_is_privileged: Whether requester has course-level privileges (controls what data is returned)
 
         Returns:
-            Dictionary containing list of muted users
+            Dictionary containing list of muted users based on requester permissions
+
+        Authorization:
+            - Learners: Can only see their own personal mutes
+            - Privileged users: Can see course-wide mutes and all personal mutes
         """
         try:
+            # Only verify staff status if the requester_is_privileged flag is False
+            # (i.e., we weren't explicitly told the user is privileged)
+            if requester_id and not requester_is_privileged:
+                try:
+                    requester = User.objects.get(pk=int(requester_id))
+                    # Fall back to checking is_staff if flag wasn't set
+                    requester_is_privileged = requester.is_staff
+                except User.DoesNotExist:
+                    pass
+
             query = DiscussionMute.objects.filter(course_id=course_id, is_active=True)
 
-            if scope == "personal":
-                query = query.filter(scope=DiscussionMute.Scope.PERSONAL)
+            # Apply scope-based filtering based on requester role
+            if requester_is_privileged:
+                # Privileged users can see all mutes based on scope requested
+                if scope == "personal":
+                    # Show only personal mutes
+                    query = query.filter(scope=DiscussionMute.Scope.PERSONAL)
+                elif scope == "course":
+                    # Show only course-wide mutes
+                    query = query.filter(scope=DiscussionMute.Scope.COURSE)
+                # For "all" scope, show both personal and course mutes (no additional filter)
+            else:
+                # Learners can only see their own personal mutes
                 if requester_id:
-                    query = query.filter(muted_by__pk=int(requester_id))
-            elif scope == "course":
-                query = query.filter(scope=DiscussionMute.Scope.COURSE)
+                    query = query.filter(
+                        scope=DiscussionMute.Scope.PERSONAL,
+                        muted_by__pk=int(requester_id),
+                    )
+                else:
+                    # No mutes to return if requester_id is None
+                    query = query.none()
 
             muted_users = []
             for mute in query.select_related("muted_user", "muted_by"):

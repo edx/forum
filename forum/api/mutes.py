@@ -19,6 +19,7 @@ def mute_user(
     course_id: str,
     scope: str = "personal",
     reason: str = "",
+    requester_is_privileged: bool = False,
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """
@@ -30,6 +31,7 @@ def mute_user(
         course_id: Course identifier
         scope: Mute scope ('personal' or 'course')
         reason: Optional reason for mute
+        requester_is_privileged: Whether requester has course-level privileges
 
     Returns:
         Dictionary containing mute record data
@@ -42,6 +44,7 @@ def mute_user(
             course_id=course_id,
             scope=scope,
             reason=reason,
+            requester_is_privileged=requester_is_privileged,
             **kwargs,
         )
     except ValueError as e:
@@ -190,6 +193,7 @@ def mute_and_report_user(
     thread_id: str = "",
     comment_id: str = "",
     request: Optional[HttpRequest] = None,
+    requester_is_privileged: bool = False,
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """
@@ -204,6 +208,7 @@ def mute_and_report_user(
         thread_id: Optional content ID to flag (tries as thread, then comment)
         comment_id: Optional comment ID to flag as abusive
         request: Django request object for content flagging
+        requester_is_privileged: Whether requester has course-level privileges
         **kwargs: Additional parameters to pass to backend.mute_user
 
     Returns:
@@ -219,6 +224,7 @@ def mute_and_report_user(
             course_id=course_id,
             scope=scope,
             reason=reason,
+            requester_is_privileged=requester_is_privileged,
             **kwargs,
         )
 
@@ -281,23 +287,33 @@ def get_all_muted_users_for_course(
     course_id: str,
     requester_id: Optional[str] = None,
     scope: str = "all",
+    requester_is_privileged: bool = False,
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """
-    Get all muted users in a course (requires appropriate permissions).
+    Get all muted users in a course with role-based access control.
 
     Args:
         course_id: Course identifier
-        requester_id: ID of the user requesting the list (optional)
+        requester_id: ID of the user requesting the list
         scope: Scope filter ('personal', 'course', or 'all')
+        requester_is_privileged: Whether the requester has course-level privileges
 
     Returns:
-        Dictionary containing list of all muted users in the course
+        Dictionary containing list of muted users based on requester role and scope
+
+    Authorization:
+        - Learners: Can only see their own personal mutes
+        - Staff: Can see course-wide mutes and all personal mutes
     """
     try:
         backend = get_backend(course_id)()
         return backend.get_all_muted_users_for_course(
-            course_id=course_id, requester_id=requester_id, scope=scope, **kwargs
+            course_id=course_id,
+            requester_id=requester_id,
+            scope=scope,
+            requester_is_privileged=requester_is_privileged,
+            **kwargs,
         )
     except ValueError as e:
         raise ForumV2RequestError(str(e)) from e

@@ -486,6 +486,7 @@ class AbstractBackend:
         course_id: str,
         scope: str = "personal",
         reason: str = "",
+        requester_is_privileged: bool = False,
         **kwargs: Any
     ) -> dict[str, Any]:
         """
@@ -497,6 +498,7 @@ class AbstractBackend:
             course_id: Course identifier
             scope: Mute scope ('personal' or 'course')
             reason: Optional reason for mute
+            requester_is_privileged: Whether requester has course-level privileges
 
         Returns:
             Dictionary containing mute record data
@@ -620,18 +622,24 @@ class AbstractBackend:
         course_id: str,
         requester_id: Optional[str] = None,
         scope: str = "all",
+        requester_is_privileged: bool = False,
         **kwargs: Any
     ) -> dict[str, Any]:
         """
-        Get all muted users in a course.
+        Get all muted users in a course with role-based access control.
 
         Args:
             course_id: Course identifier
             requester_id: ID of user requesting the list
             scope: Scope filter ('personal', 'course', or 'all')
+            requester_is_privileged: Whether the requester is a privileged user (staff/instructor/etc)
 
         Returns:
-            Dictionary containing list of muted users
+            Dictionary containing list of muted users based on requester role and scope
+
+        Authorization:
+            - Learners: Can only see their own personal mutes
+            - Staff: Can see course-wide mutes and all personal mutes
         """
         raise NotImplementedError
 

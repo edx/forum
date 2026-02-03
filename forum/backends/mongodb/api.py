@@ -2052,6 +2052,7 @@ class MongoBackend(AbstractBackend):
         course_id: str,
         scope: str = "personal",
         reason: str = "",
+        requester_is_privileged: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """
@@ -2063,6 +2064,7 @@ class MongoBackend(AbstractBackend):
             course_id: Course identifier
             scope: Mute scope ('personal' or 'course')
             reason: Optional reason for mute
+            requester_is_privileged: Whether requester has course-level privileges
 
         Returns:
             Dictionary containing mute record data
@@ -2077,6 +2079,7 @@ class MongoBackend(AbstractBackend):
                 course_id=course_id,
                 scope=scope,
                 reason=reason,
+                requester_is_privileged=requester_is_privileged,
             )
 
             # Create audit log
@@ -2279,23 +2282,32 @@ class MongoBackend(AbstractBackend):
         course_id: str,
         requester_id: Optional[str] = None,
         scope: str = "all",
+        requester_is_privileged: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """
-        Get all muted users in a course using MongoDB backend.
+        Get all muted users in a course using MongoDB backend with role-based filtering.
 
         Args:
             course_id: Course identifier
             requester_id: ID of user requesting the list
             scope: Scope filter ('personal', 'course', or 'all')
+            requester_is_privileged: Whether requester has course-level privileges (controls what data is returned)
 
         Returns:
-            Dictionary containing list of muted users
+            Dictionary containing list of muted users based on requester permissions
+
+        Authorization:
+            - Learners: Can only see their own personal mutes
+            - Staff: Can see course-wide mutes and all personal mutes
         """
         try:
             mutes = DiscussionMutes()
             muted_users = mutes.get_all_muted_users_for_course(
-                course_id=course_id, requester_id=requester_id, scope=scope
+                course_id=course_id,
+                requester_id=requester_id,
+                scope=scope,
+                requester_is_privileged=requester_is_privileged,
             )
 
             return {
@@ -2336,7 +2348,10 @@ class MongoBackend(AbstractBackend):
             if scope == "all":
                 # Get all muted users for the course, filtering by moderator for personal mutes
                 all_mutes = mutes_model.get_all_muted_users_for_course(
-                    course_id=course_id, requester_id=moderator_id, scope="all"
+                    course_id=course_id,
+                    requester_id=moderator_id,
+                    scope="all",
+                    requester_is_privileged=False,
                 )
                 # Filter to only include mutes by this moderator
                 muted_users = [

@@ -62,9 +62,6 @@ class UnmuteInputSerializer(serializers.Serializer[Dict[str, Any]]):
 class MuteAndReportInputSerializer(serializers.Serializer[Dict[str, Any]]):
     """Serializer for mute and report input data."""
 
-    muter_id = serializers.CharField(
-        required=True, help_text="ID of user performing the mute and report action"
-    )
     scope = serializers.ChoiceField(
         choices=DiscussionMute.Scope.choices,
         default=DiscussionMute.Scope.PERSONAL,

@@ -5,8 +5,10 @@ from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
-
+from django.contrib.auth import get_user_model
 from forum.backends.mongodb.base_model import MongoBaseModel
+
+User = get_user_model()
 
 
 class DiscussionMutes(MongoBaseModel):
@@ -61,6 +63,7 @@ class DiscussionMutes(MongoBaseModel):
         course_id: str,
         scope: str = "personal",
         reason: str = "",
+        requester_is_privileged: bool = False,
     ) -> Dict[str, Any]:
         """
         Create a new mute record.
@@ -71,9 +74,13 @@ class DiscussionMutes(MongoBaseModel):
             course_id: Course identifier
             scope: Mute scope ('personal' or 'course')
             reason: Optional reason for muting
+            requester_is_privileged: Whether requester has course-level privileges
 
         Returns:
             Created mute document
+
+        Raises:
+            ValueError: If rules are violated (staff requirement for course scope, etc.)
         """
         # Validate scope parameter
         valid_scopes = {"personal", "course"}
@@ -81,6 +88,22 @@ class DiscussionMutes(MongoBaseModel):
             raise ValueError(
                 f"Invalid scope '{scope}'. Must be one of: {', '.join(valid_scopes)}"
             )
+
+        try:
+            muter_user = User.objects.get(pk=int(muter_id))
+        except User.DoesNotExist as e:
+            raise ValueError(f"User not found: {e}") from e
+
+        # Prevent self-muting
+        if int(muted_user_id) == int(muter_id):
+            raise ValueError("Users cannot mute themselves")
+
+        # Only privileged users (staff, instructor, TA, etc.) can create course-wide mutes
+        # Check requester_is_privileged flag or fall back to is_staff check
+        muter_is_staff = getattr(muter_user, "is_staff", False)
+        is_privileged = requester_is_privileged or muter_is_staff
+        if scope == "course" and not is_privileged:
+            raise ValueError("Only staff can create course-wide mutes")
 
         # Check for existing active mute
         existing = self.get_active_mutes(
@@ -170,27 +193,55 @@ class DiscussionMutes(MongoBaseModel):
         }
 
     def get_all_muted_users_for_course(
-        self, course_id: str, requester_id: Optional[str] = None, scope: str = "all"
+        self,
+        course_id: str,
+        requester_id: Optional[str] = None,
+        scope: str = "all",
+        requester_is_privileged: bool = False,
     ) -> List[Dict[str, Any]]:
         """
-        Get all muted users in a course.
+        Get all muted users in a course with role-based filtering.
 
         Args:
             course_id: Course identifier
             requester_id: ID of user requesting the list (for personal mutes)
             scope: Scope filter ('personal', 'course', or 'all')
+            requester_is_privileged: Whether requester has course-level privileges (controls what data is returned)
 
         Returns:
-            List of active mute records with serialized ObjectIds
+            List of active mute records based on requester permissions
+
+        Authorization:
+            - Learners: Can only see their own personal mutes
+            - Privileged users: Can see course-wide mutes and all personal mutes
         """
+
+        # Only verify staff status if the requester_is_privileged flag is False
+        # (i.e., we weren't explicitly told the user is privileged)
+        if requester_id and not requester_is_privileged:
+            try:
+                requester = User.objects.get(pk=int(requester_id))
+                # Fall back to checking is_staff if flag wasn't set
+                requester_is_privileged = getattr(requester, "is_staff", False)
+            except User.DoesNotExist:
+                pass
+
         query = {"course_id": course_id, "is_active": True}
 
-        if scope == "personal":
+        # Apply scope-based filtering based on requester role
+        if requester_is_privileged:
+            # Privileged users can see all mutes based on scope requested
+            if scope == "personal":
+                # Show only personal mutes
+                query["scope"] = "personal"
+            elif scope == "course":
+                # Show only course-wide mutes
+                query["scope"] = "course"
+            # For "all" scope, show both personal and course mutes (no additional filter)
+        else:
+            # Learners can only see their own personal mutes
             query["scope"] = "personal"
-            if requester_id:
-                query["muter_id"] = requester_id
-        elif scope == "course":
-            query["scope"] = "course"
+            query["muter_id"] = requester_id
 
         # Get mute documents and convert ObjectId to string for JSON compatibility
         mute_docs = list(self._collection.find(query))

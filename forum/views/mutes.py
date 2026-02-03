@@ -10,6 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from opaque_keys.edx.keys import CourseKey
 
 from forum.api.mutes import (
     get_all_muted_users_for_course,
@@ -63,7 +64,6 @@ class MuteUserAPIView(APIView):
             course_id (str): The course ID.
 
         Body:
-            muter_id: ID of user performing the mute
             scope: Mute scope ('personal' or 'course')
             reason: Optional reason for muting
 
@@ -71,15 +71,16 @@ class MuteUserAPIView(APIView):
             Response: A response with the mute operation result.
         """
         try:
-            muter_id = request.data.get("muter_id")
-            scope = request.data.get("scope", "personal")
-            reason = request.data.get("reason", "")
-
+            # Derive muter_id from authenticated user
+            muter_id = str(request.user.id) if hasattr(request.user, "id") else None
             if not muter_id:
                 return Response(
-                    {"error": "muter_id is required"},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {"error": "User must be authenticated"},
+                    status=status.HTTP_401_UNAUTHORIZED,
                 )
+
+            scope = request.data.get("scope", "personal")
+            reason = request.data.get("reason", "")
 
             # Validate scope parameter
             scope_error = _validate_scope(scope)
@@ -87,6 +88,14 @@ class MuteUserAPIView(APIView):
                 return Response(
                     {"error": scope_error["error"]},
                     status=scope_error["status"],
+                )
+
+            # Only privileged users can create course-wide mutes
+            user_is_staff = getattr(request.user, "is_staff", False)
+            if scope == "course" and not user_is_staff:
+                return Response(
+                    {"error": "Only privileged users can create course-wide mutes"},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
 
             result = mute_user(
@@ -128,7 +137,7 @@ class UnmuteUserAPIView(APIView):
             course_id (str): The course ID.
 
         Body:
-            muter_id: ID of the original user who muted this user (required)
+            muter_id: ID of the original user who muted this user (required for personal scope only)
             scope: Unmute scope ('personal' or 'course')
 
         Returns:
@@ -150,12 +159,6 @@ class UnmuteUserAPIView(APIView):
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
 
-            if not original_muter_id:
-                return Response(
-                    {"error": "muter_id is required"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
             # Validate scope parameter
             scope_error = _validate_scope(scope)
             if scope_error:
@@ -164,12 +167,30 @@ class UnmuteUserAPIView(APIView):
                     status=scope_error["status"],
                 )
 
+            # muter_id is required only for personal-scope unmutes
+            if scope == "personal" and not original_muter_id:
+                return Response(
+                    {"error": "muter_id is required for personal-scope unmutes"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # For course-scope unmutes, forbid muter_id if provided
+            if scope == "course" and original_muter_id:
+                return Response(
+                    {
+                        "error": "muter_id should not be provided for course-scope unmutes"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             result = unmute_user(
                 muted_user_id=user_id,
                 unmuted_by_id=current_user_id,  # Current user performing unmute
                 course_id=course_id,
                 scope=scope,
-                muter_id=original_muter_id,  # Original muter for tracking
+                muter_id=(
+                    original_muter_id if scope == "personal" else None
+                ),  # Only for personal mutes
             )
 
             return Response(result, status=status.HTTP_200_OK)
@@ -203,7 +224,6 @@ class MuteAndReportUserAPIView(APIView):
             course_id (str): The course ID.
 
         Body:
-            muter_id: ID of user performing the action
             scope: Mute scope ('personal' or 'course')
             reason: Reason for muting and reporting
 
@@ -214,9 +234,24 @@ class MuteAndReportUserAPIView(APIView):
             serializer = MuteAndReportInputSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
 
-            muter_id = serializer.validated_data["muter_id"]
+            # Derive muter_id from authenticated user
+            muter_id = str(request.user.id) if hasattr(request.user, "id") else None
+            if not muter_id:
+                return Response(
+                    {"error": "User must be authenticated"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
             scope = serializer.validated_data["scope"]
             reason = serializer.validated_data["reason"]
+
+            # Only staff can create course-wide mutes
+            user_is_staff = getattr(request.user, "is_staff", False)
+            if scope == "course" and not user_is_staff:
+                return Response(
+                    {"error": "Only staff can create course-wide mutes"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
             result = mute_and_report_user(
                 muted_user_id=user_id,
@@ -256,19 +291,28 @@ class UserMuteStatusAPIView(APIView):
             user_id (str): The ID of the user to check.
             course_id (str): The course ID.
 
-        Query Parameters:
-            viewer_id: ID of the user checking the status
-
         Returns:
             Response: A response with the user's mute status.
+
+        Note:
+            viewer_id is always derived from the authenticated user.
+            Any viewer_id in query params will be rejected if it doesn't match.
         """
         try:
-            viewer_id = request.query_params.get("viewer_id")
-
+            # Derive viewer_id from authenticated user
+            viewer_id = str(request.user.id) if hasattr(request.user, "id") else None
             if not viewer_id:
                 return Response(
-                    {"error": "viewer_id is required"},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {"error": "User must be authenticated"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            # Reject any attempt to override viewer_id via query params
+            requested_viewer_id = request.query_params.get("viewer_id")
+            if requested_viewer_id and requested_viewer_id != viewer_id:
+                return Response(
+                    {"error": "Cannot query mute status as a different user"},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
 
             result = get_user_mute_status(
@@ -307,21 +351,51 @@ class CourseMutedUsersAPIView(APIView):
             course_id (str): The course ID.
 
         Query Parameters:
-            muter_id: ID of user requesting the list
-            scope: Filter by scope ('personal', 'course', or 'all')
-            requester_id: Optional ID of requesting user
+            scope: Filter by scope ('personal', 'course', or 'all') - learners limited to 'personal'
 
         Returns:
             Response: A response with the course muted users list.
         """
         try:
-            requester_id = request.query_params.get("requester_id")
+            # Force requester_id to authenticated user
+            requester_id = str(request.user.id) if hasattr(request.user, "id") else None
+            if not requester_id:
+                return Response(
+                    {"error": "User must be authenticated"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
             scope = request.query_params.get("scope", "all")
 
+            # Validate scope parameter
+            scope_error = _validate_scope(scope)
+            if scope_error:
+                return Response(
+                    {"error": scope_error["error"]},
+                    status=scope_error["status"],
+                )
+
+            # Use is_staff as the privilege indicator for forum service
+            try:
+                # Validate course_id format
+                CourseKey.from_string(course_id)
+                requester_is_privileged = getattr(request.user, "is_staff", False)
+            except Exception:  # pylint: disable=broad-except
+                # If we can't determine course key, use is_staff as fallback
+                requester_is_privileged = getattr(request.user, "is_staff", False)
+
+            # Learners can only view their own personal mutes
+            # Privileged users can view course-wide mutes and all scopes
+            if not requester_is_privileged:
+                # For learners, force scope to "personal" and filter to their own mutes only
+                scope = "personal"
+
+            # Pass the requester's privilege status to the backend for filtering
             result = get_all_muted_users_for_course(
                 course_id=course_id,
                 requester_id=requester_id,
                 scope=scope,
+                requester_is_staff=requester_is_privileged,
             )
 
             return Response(result, status=status.HTTP_200_OK)
