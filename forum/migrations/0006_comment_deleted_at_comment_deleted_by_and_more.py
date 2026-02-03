@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("forum", "0006_add_discussion_mute_models"),
+        ("forum", "0005_moderationauditlog_comment_is_spam_and_more"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

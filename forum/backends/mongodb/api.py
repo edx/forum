@@ -2085,6 +2085,7 @@ class MongoBackend(AbstractBackend):
             # Create audit log
             try:
                 muter = User.objects.get(id=muter_id)
+                muted_user = User.objects.get(id=muted_user_id)
                 audit_log = ModerationAuditLog(
                     timestamp=datetime.now(dt_timezone.utc),
                     body=f"User muted: {muted_user_id}",
@@ -2098,7 +2099,8 @@ class MongoBackend(AbstractBackend):
                     reasoning=reason or "No reason provided",
                     classification="mute",
                     actions_taken="user_muted",
-                    original_author=muter,
+                    original_author=muted_user,
+                    moderator=muter,
                 )
                 audit_log.save()
             except Exception:  # pylint: disable=broad-exception-caught
@@ -2150,6 +2152,7 @@ class MongoBackend(AbstractBackend):
             # Create audit log for unmute action
             try:
                 unmuter = User.objects.get(id=unmuted_by_id)
+                muted_user = User.objects.get(id=muted_user_id)
                 audit_log = ModerationAuditLog(
                     timestamp=datetime.now(dt_timezone.utc),
                     body=f"User unmuted: {muted_user_id}",
@@ -2163,7 +2166,8 @@ class MongoBackend(AbstractBackend):
                     reasoning="User unmuted",
                     classification="unmute",
                     actions_taken="user_unmuted",
-                    original_author=unmuter,
+                    original_author=muted_user,
+                    moderator=unmuter,
                 )
                 audit_log.save()
             except Exception:  # pylint: disable=broad-exception-caught
@@ -2213,6 +2217,7 @@ class MongoBackend(AbstractBackend):
             # Create audit log for mute_and_report action
             try:
                 muter = User.objects.get(id=muter_id)
+                muted_user = User.objects.get(id=muted_user_id)
                 audit_log = ModerationAuditLog(
                     timestamp=datetime.now(dt_timezone.utc),
                     body=f"User muted and reported: {muted_user_id}",
@@ -2228,7 +2233,8 @@ class MongoBackend(AbstractBackend):
                     reasoning=reason or "No reason provided",
                     classification="mute_and_report",
                     actions_taken="user_muted_and_reported",
-                    original_author=muter,
+                    original_author=muted_user,
+                    moderator=muter,
                 )
                 audit_log.save()
             except Exception:  # pylint: disable=broad-exception-caught

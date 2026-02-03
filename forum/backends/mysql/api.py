@@ -2548,15 +2548,23 @@ class MySQLBackend(AbstractBackend):
             if muted_user.pk == muted_by_user.pk:
                 raise ValidationError("Users cannot mute themselves")
 
-            # Prevent learners from muting staff
-            if muted_user.is_staff and not muted_by_user.is_staff:
-                raise ValidationError("Learners cannot mute staff users")
+            target_is_staff = getattr(muted_user, "is_staff", False)
+            requester_is_staff = getattr(muted_by_user, "is_staff", False)
 
-            # Only privileged users (staff, instructor, TA, etc.) can create course-wide mutes
-            # Check requester_is_privileged flag or fall back to is_staff check
-            is_privileged = requester_is_privileged or muted_by_user.is_staff
+            # Prevent muting of staff and privileged users
+            # Staff cannot mute other staff, and privileged users cannot mute each other
+            target_is_privileged = target_is_staff
+            if target_is_privileged:
+                raise ValidationError("Staff and privileged users cannot be muted")
+
+            is_privileged = requester_is_privileged or requester_is_staff
+
+            # Only privileged users can create course-wide mutes
             if scope == DiscussionMute.Scope.COURSE and not is_privileged:
-                raise ValidationError("Only staff can create course-wide mutes")
+                raise ValidationError(
+                    "Only privileged users (staff, instructors, CTAs, moderators) "
+                    "can create course-wide mutes"
+                )
 
             # Check if mute already exists
             existing_mute = DiscussionMute.objects.filter(

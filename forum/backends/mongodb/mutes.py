@@ -90,6 +90,7 @@ class DiscussionMutes(MongoBaseModel):
             )
 
         try:
+            muted_user = User.objects.get(pk=int(muted_user_id))
             muter_user = User.objects.get(pk=int(muter_id))
         except User.DoesNotExist as e:
             raise ValueError(f"User not found: {e}") from e
@@ -98,12 +99,22 @@ class DiscussionMutes(MongoBaseModel):
         if int(muted_user_id) == int(muter_id):
             raise ValueError("Users cannot mute themselves")
 
-        # Only privileged users (staff, instructor, TA, etc.) can create course-wide mutes
-        # Check requester_is_privileged flag or fall back to is_staff check
-        muter_is_staff = getattr(muter_user, "is_staff", False)
-        is_privileged = requester_is_privileged or muter_is_staff
+        target_is_staff = getattr(muted_user, "is_staff", False)
+        requester_is_staff = getattr(muter_user, "is_staff", False)
+        is_privileged = requester_is_privileged or requester_is_staff
+
+        # Prevent muting of staff and privileged users
+        # Staff cannot mute other staff, and privileged users cannot mute each other
+        target_is_privileged = target_is_staff
+        if target_is_privileged:
+            raise ValueError("Staff and privileged users cannot be muted")
+
+        # Only privileged users can create course-wide mutes
         if scope == "course" and not is_privileged:
-            raise ValueError("Only staff can create course-wide mutes")
+            raise ValueError(
+                "Only privileged users (staff, instructors, CTAs, moderators) "
+                "can create course-wide mutes"
+            )
 
         # Check for existing active mute
         existing = self.get_active_mutes(
