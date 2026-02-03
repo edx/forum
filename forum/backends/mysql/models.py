@@ -831,7 +831,6 @@ class ModerationAuditLog(models.Model):
         ("flagged", "Content Flagged"),
         ("soft_deleted", "Content Soft Deleted"),
         ("no_action", "No Action Taken"),
-        # ---- ADDED: discussion moderation actions ----
         ("mute", "Mute"),
         ("unmute", "Unmute"),
         ("mute_and_report", "Mute and Report"),
@@ -888,7 +887,6 @@ class ModerationAuditLog(models.Model):
         help_text="Original author of the moderated content",
     )
 
-    # ---- ADDED: fields required for mute moderation ----
     course_id: models.CharField[str, str] = models.CharField(
         max_length=255,
         blank=True,
@@ -1052,17 +1050,11 @@ class DiscussionMute(models.Model):
         }
 
     def clean(self) -> None:
-        """Additional validation depending on mute scope."""
+        """Additional validation for mute records."""
 
-        # Personal mute must have a muted_by different from muted_user
-        if self.scope == self.Scope.PERSONAL:
-            if self.muted_by == self.muted_user:
-                raise ValidationError("Personal mute cannot be self-applied.")
-
-        # Course-wide mute must not be self-applied
-        if self.scope == self.Scope.COURSE:
-            if self.muted_by == self.muted_user:
-                raise ValidationError("Course-wide mute cannot be self-applied.")
+        # Mutes cannot be self-applied
+        if self.muted_by == self.muted_user:
+            raise ValidationError("Users cannot mute themselves.")
 
     def __str__(self) -> str:
         return f"{self.muted_by} muted {self.muted_user} in {self.course_id} ({self.scope})"

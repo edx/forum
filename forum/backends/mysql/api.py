@@ -2849,7 +2849,7 @@ class MySQLBackend(AbstractBackend):
         """Get list of users muted by a moderator."""
         try:
             queryset = DiscussionMute.objects.filter(
-                course_id=course_id, muter_id=moderator_id, scope=scope
+                course_id=course_id, muted_by=moderator_id, scope=scope
             )
             if active_only:
                 queryset = queryset.filter(is_active=True)

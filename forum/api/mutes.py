@@ -5,8 +5,8 @@ Native Python APIs for discussion moderation (mute/unmute).
 import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
-from django.http import HttpRequest
 
+from django.http import HttpRequest
 from forum.backend import get_backend
 from forum.utils import ForumV2RequestError
 
@@ -140,7 +140,47 @@ def get_muted_users(
         raise ForumV2RequestError(f"Failed to get muted users: {str(e)}") from e
 
 
-# pylint: disable=too-many-statements
+def _flag_content(
+    backend: Any,
+    user_id: str,
+    entity_id: str,
+    entity_type: str,
+) -> Dict[str, Any]:
+    """
+    Helper to flag a single piece of content and return standardized result.
+
+    Args:
+        backend: Forum backend instance
+        user_id: User performing the flag
+        entity_id: ID of content to flag
+        entity_type: Type of entity ('CommentThread' or 'Comment')
+
+    Returns:
+        Dictionary with flag operation result
+    """
+    content_type = "thread" if entity_type == "CommentThread" else "comment"
+
+    try:
+        backend.flag_as_abuse(
+            user_id=user_id, entity_id=entity_id, entity_type=entity_type
+        )
+        log.info(
+            "%s %s flagged as abusive by user %s",
+            content_type.capitalize(),
+            entity_id,
+            user_id,
+        )
+        return {"content_type": content_type, "content_id": entity_id, "flagged": True}
+    except Exception as e:  # pylint: disable=broad-except
+        log.warning("Failed to flag %s %s: %s", content_type, entity_id, str(e))
+        return {
+            "content_type": content_type,
+            "content_id": entity_id,
+            "flagged": False,
+            "error": str(e),
+        }
+
+
 def mute_and_report_user(
     muted_user_id: str,
     muter_id: str,
@@ -161,7 +201,7 @@ def mute_and_report_user(
         course_id: Course identifier
         scope: Mute scope ('personal' or 'course')
         reason: Reason for muting and reporting
-        thread_id: Optional thread ID to flag as abusive
+        thread_id: Optional content ID to flag (tries as thread, then comment)
         comment_id: Optional comment ID to flag as abusive
         request: Django request object for content flagging
         **kwargs: Additional parameters to pass to backend.mute_user
@@ -182,93 +222,34 @@ def mute_and_report_user(
             **kwargs,
         )
 
-        # Handle content flagging if thread_id or comment_id is provided
-        report_result: Dict[str, Any] = {}
-        if (thread_id or comment_id) and request:  # pylint: disable=broad-except
-            try:
-                backend = get_backend(course_id)()
+        # Handle content flagging
+        flagged_items = []
+        if (thread_id or comment_id) and request:
+            user_id = str(getattr(request.user, "id", ""))
 
-                # Flag the content as abusive using forum's backend
-                content_type: Optional[str] = None
-                content_id: Optional[str] = None
+            # Flag thread_id (may be thread or comment)
+            if thread_id:
+                result = _flag_content(backend, user_id, thread_id, "CommentThread")
+                if not result["flagged"]:
+                    # Retry as comment
+                    result = _flag_content(backend, user_id, thread_id, "Comment")
+                flagged_items.append(result)
 
-                if thread_id:
-                    try:
-                        # Try as thread first
-                        backend.flag_as_abuse(
-                            user_id=str(getattr(request.user, "id", "")),
-                            entity_id=thread_id,
-                            entity_type="CommentThread",
-                        )
-                        content_type = "thread"
-                        content_id = thread_id
-                        report_result = {
-                            "status": "success",
-                            "content_type": content_type,
-                            "content_id": content_id,
-                            "flagged": True,
-                            "message": "Thread flagged as abusive",
-                        }
-                    except Exception:  # pylint: disable=broad-except
-                        try:
-                            # If thread fails, try as comment
-                            backend.flag_as_abuse(
-                                user_id=str(getattr(request.user, "id", "")),
-                                entity_id=thread_id,
-                                entity_type="Comment",
-                            )
-                            content_type = "comment"
-                            content_id = thread_id
-                            report_result = {
-                                "status": "success",
-                                "content_type": content_type,
-                                "content_id": content_id,
-                                "flagged": True,
-                                "message": "Comment flagged as abusive",
-                            }
-                        except Exception as e:  # pylint: disable=broad-except
-                            report_result = {
-                                "status": "partial",
-                                "content_type": "unknown",
-                                "content_id": thread_id,
-                                "error": str(e),
-                                "flagged": False,
-                                "message": "Mute successful, but content flagging failed",
-                            }
+            # Flag comment_id separately
+            if comment_id:
+                flagged_items.append(
+                    _flag_content(backend, user_id, comment_id, "Comment")
+                )
 
-                elif comment_id:
-                    try:
-                        backend.flag_as_abuse(
-                            user_id=str(getattr(request.user, "id", "")),
-                            entity_id=comment_id,
-                            entity_type="Comment",
-                        )
-                        report_result = {
-                            "status": "success",
-                            "content_type": "comment",
-                            "content_id": comment_id,
-                            "flagged": True,
-                            "message": "Comment flagged as abusive",
-                        }
-                    except Exception as e:  # pylint: disable=broad-except
-                        report_result = {
-                            "status": "partial",
-                            "content_type": "comment",
-                            "content_id": comment_id,
-                            "error": str(e),
-                            "flagged": False,
-                            "message": "Mute successful, but content flagging failed",
-                        }
-
-            except Exception as e:  # pylint: disable=broad-except
-                log.exception("Report system failed after mute")
-                report_result = {
-                    "status": "error",
-                    "error": str(e),
-                    "message": "Mute successful, but report system unavailable",
-                }
+        # Build report result
+        if flagged_items:
+            all_flagged = all(item["flagged"] for item in flagged_items)
+            report_result = {
+                "status": "success" if all_flagged else "partial",
+                "flagged_items": flagged_items,
+            }
         else:
-            # Basic report record when no content ID is provided
+            # No content to flag
             report_result = {
                 "status": "success",
                 "report_id": f"report_{muted_user_id}_{muter_id}_{course_id}",
@@ -284,7 +265,7 @@ def mute_and_report_user(
             "status": "success",
             "message": (
                 "User muted and content flagged"
-                if report_result.get("flagged")
+                if flagged_items
                 else "User muted and reported"
             ),
             "mute_record": mute_result,

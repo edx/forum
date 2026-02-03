@@ -3,6 +3,7 @@ Forum Mute / Unmute API Views.
 """
 
 import logging
+from typing import Any, Dict
 
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -17,9 +18,30 @@ from forum.api.mutes import (
     mute_user,
     unmute_user,
 )
+from forum.backends.mysql.models import DiscussionMute
+from forum.serializers.mute import MuteAndReportInputSerializer
 from forum.utils import ForumV2RequestError
 
 log = logging.getLogger(__name__)
+
+
+def _validate_scope(scope: str) -> Dict[str, Any]:
+    """
+    Validate mute scope parameter.
+
+    Args:
+        scope (str): The scope value to validate.
+
+    Returns:
+        Dict[str, Any]: Error response dict if invalid, empty dict if valid.
+    """
+    valid_scopes = [choice[0] for choice in DiscussionMute.Scope.choices]
+    if scope not in valid_scopes:
+        return {
+            "error": f"Invalid scope '{scope}'. Must be one of: {', '.join(valid_scopes)}",
+            "status": status.HTTP_400_BAD_REQUEST,
+        }
+    return {}
 
 
 class MuteUserAPIView(APIView):
@@ -57,6 +79,14 @@ class MuteUserAPIView(APIView):
                 return Response(
                     {"error": "muter_id is required"},
                     status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Validate scope parameter
+            scope_error = _validate_scope(scope)
+            if scope_error:
+                return Response(
+                    {"error": scope_error["error"]},
+                    status=scope_error["status"],
                 )
 
             result = mute_user(
@@ -98,30 +128,48 @@ class UnmuteUserAPIView(APIView):
             course_id (str): The course ID.
 
         Body:
-            muter_id: ID of user performing the unmute
+            muter_id: ID of the original user who muted this user (required)
             scope: Unmute scope ('personal' or 'course')
-            muter_id: Optional - for personal scope unmutes
 
         Returns:
             Response: A response with the unmute operation result.
         """
         try:
-            muter_id = request.data.get("muter_id")
+            original_muter_id = request.data.get(
+                "muter_id"
+            )  # Who originally muted the user
             scope = request.data.get("scope", "personal")
-            muter_id = request.data.get("muter_id")
+            # Current user performing the unmute
+            current_user_id = (
+                str(request.user.id) if hasattr(request.user, "id") else None
+            )
 
-            if not muter_id:
+            if not current_user_id:
+                return Response(
+                    {"error": "User must be authenticated"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            if not original_muter_id:
                 return Response(
                     {"error": "muter_id is required"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            # Validate scope parameter
+            scope_error = _validate_scope(scope)
+            if scope_error:
+                return Response(
+                    {"error": scope_error["error"]},
+                    status=scope_error["status"],
+                )
+
             result = unmute_user(
                 muted_user_id=user_id,
-                unmuted_by_id=muter_id,
+                unmuted_by_id=current_user_id,  # Current user performing unmute
                 course_id=course_id,
                 scope=scope,
-                muter_id=muter_id,
+                muter_id=original_muter_id,  # Original muter for tracking
             )
 
             return Response(result, status=status.HTTP_200_OK)
@@ -163,15 +211,12 @@ class MuteAndReportUserAPIView(APIView):
             Response: A response with the mute and report operation result.
         """
         try:
-            muter_id = request.data.get("muter_id")
-            scope = request.data.get("scope", "personal")
-            reason = request.data.get("reason", "")
+            serializer = MuteAndReportInputSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
 
-            if not muter_id:
-                return Response(
-                    {"error": "muter_id is required"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            muter_id = serializer.validated_data["muter_id"]
+            scope = serializer.validated_data["scope"]
+            reason = serializer.validated_data["reason"]
 
             result = mute_and_report_user(
                 muted_user_id=user_id,

@@ -19,4 +19,6 @@ class Command(BaseCommand):
         This command creates or updates indexes in the mongodb for the content model.
         """
         BaseContents().create_indexes()
-        self.style.SUCCESS("Created/Updated Mongodb indexes successfuly.")
+        self.stdout.write(
+            self.style.SUCCESS("Created/Updated Mongodb indexes successfuly.")
+        )

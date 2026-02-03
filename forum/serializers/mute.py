@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 from rest_framework import serializers
 
-from forum.models import DiscussionMute, DiscussionMuteException, ModerationAuditLog
+from forum.models import DiscussionMute, DiscussionMuteException
 
 
 class MuteInputSerializer(serializers.Serializer[Dict[str, Any]]):
@@ -243,32 +243,3 @@ class DiscussionMuteExceptionSerializer(
             "modified",
         ]
         read_only_fields = ["id", "created", "modified"]
-
-
-class ModerationAuditLogSerializer(serializers.ModelSerializer[ModerationAuditLog]):
-    """Serializer for ModerationAuditLog model (mute-related entries)."""
-
-    moderator_id = serializers.CharField(
-        source="moderator.pk", read_only=True, allow_null=True
-    )
-    moderator_username = serializers.CharField(
-        source="moderator.username", read_only=True, allow_null=True
-    )
-
-    class Meta:
-        model = ModerationAuditLog
-        fields = [
-            "id",
-            "timestamp",
-            "body",
-            "classifier_output",
-            "reasoning",
-            "classification",
-            "actions_taken",
-            "confidence_score",
-            "moderator_override",
-            "override_reason",
-            "moderator_id",
-            "moderator_username",
-        ]
-        read_only_fields = ["id", "timestamp"]

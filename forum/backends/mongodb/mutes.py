@@ -47,9 +47,12 @@ class DiscussionMutes(MongoBaseModel):
         if scope:
             query["scope"] = scope
 
-        # Get mute documents and serialize ObjectId fields for JSON compatibility
+        # Get mute documents and convert ObjectId to string for JSON compatibility
         mute_docs = list(self._collection.find(query))
-        return self._serialize_objectids_in_list(mute_docs)
+        for doc in mute_docs:
+            if "_id" in doc:
+                doc["_id"] = str(doc["_id"])
+        return mute_docs
 
     def create_mute(
         self,
@@ -72,6 +75,13 @@ class DiscussionMutes(MongoBaseModel):
         Returns:
             Created mute document
         """
+        # Validate scope parameter
+        valid_scopes = {"personal", "course"}
+        if scope not in valid_scopes:
+            raise ValueError(
+                f"Invalid scope '{scope}'. Must be one of: {', '.join(valid_scopes)}"
+            )
+
         # Check for existing active mute
         existing = self.get_active_mutes(
             muted_user_id=muted_user_id,
@@ -182,9 +192,12 @@ class DiscussionMutes(MongoBaseModel):
         elif scope == "course":
             query["scope"] = "course"
 
-        # Get mute documents and serialize ObjectId fields for JSON compatibility
+        # Get mute documents and convert ObjectId to string for JSON compatibility
         mute_docs = list(self._collection.find(query))
-        return self._serialize_objectids_in_list(mute_docs)
+        for doc in mute_docs:
+            if "_id" in doc:
+                doc["_id"] = str(doc["_id"])
+        return mute_docs
 
     def get_user_mute_status(
         self, user_id: str, course_id: str, viewer_id: str
@@ -361,102 +374,9 @@ class DiscussionMuteExceptions(MongoBaseModel):
         Returns:
             List of exception documents with serialized ObjectIds
         """
-        # Get exception documents and serialize ObjectId fields for JSON compatibility
+        # Get exception documents and convert ObjectId to string for JSON compatibility
         exception_docs = list(self._collection.find({"course_id": course_id}))
-        return self._serialize_objectids_in_list(exception_docs)
-
-
-class DiscussionModerationLogs(MongoBaseModel):
-    """
-    MongoDB model for logging moderation actions.
-    """
-
-    COLLECTION_NAME: str = "discussion_moderation_logs"
-
-    def log_action(
-        self,
-        action_type: str,
-        target_user_id: str,
-        moderator_id: str,
-        course_id: str,
-        scope: str = "personal",
-        reason: str = "",
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Log a moderation action.
-
-        Args:
-            action_type: Type of action ('mute', 'unmute', 'mute_and_report')
-            target_user_id: ID of user who was targeted
-            moderator_id: ID of user performing the action
-            course_id: Course identifier
-            scope: Action scope ('personal' or 'course')
-            reason: Optional reason for the action
-            metadata: Additional metadata for the action
-
-        Returns:
-            Created log document
-        """
-        log_doc = {
-            "_id": ObjectId(),
-            "action_type": action_type,
-            "target_user_id": target_user_id,
-            "moderator_id": moderator_id,
-            "course_id": course_id,
-            "scope": scope,
-            "reason": reason,
-            "metadata": metadata or {},
-            "timestamp": datetime.utcnow(),
-        }
-
-        result = self._collection.insert_one(log_doc)
-        log_doc["_id"] = str(result.inserted_id)
-
-        return log_doc
-
-    def get_logs_for_user(
-        self, user_id: str, course_id: Optional[str] = None, limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        """
-        Get moderation logs for a user.
-
-        Args:
-            user_id: ID of user to get logs for
-            course_id: Optional course filter
-            limit: Maximum number of logs to return
-
-        Returns:
-            List of log documents with serialized ObjectIds
-        """
-        query = {"target_user_id": user_id}
-        if course_id:
-            query["course_id"] = course_id
-
-        # Get log documents and serialize ObjectId fields for JSON compatibility
-        log_docs = list(self._collection.find(query).sort("timestamp", -1).limit(limit))
-
-        return self._serialize_objectids_in_list(log_docs)
-
-    def get_logs_for_course(
-        self, course_id: str, action_type: Optional[str] = None, limit: int = 100
-    ) -> List[Dict[str, Any]]:
-        """
-        Get moderation logs for a course.
-
-        Args:
-            course_id: Course identifier
-            action_type: Optional action type filter
-            limit: Maximum number of logs to return
-
-        Returns:
-            List of log documents with serialized ObjectIds
-        """
-        query = {"course_id": course_id}
-        if action_type:
-            query["action_type"] = action_type
-
-        # Get log documents and serialize ObjectId fields for JSON compatibility
-        log_docs = list(self._collection.find(query).sort("timestamp", -1).limit(limit))
-
-        return self._serialize_objectids_in_list(log_docs)
+        for doc in exception_docs:
+            if "_id" in doc:
+                doc["_id"] = str(doc["_id"])
+        return exception_docs
