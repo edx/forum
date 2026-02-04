@@ -2104,7 +2104,8 @@ class MongoBackend(AbstractBackend):
                 )
                 audit_log.save()
             except Exception:  # pylint: disable=broad-exception-caught
-                # Log audit error but don't fail the mute operation
+                # If audit log creation fails, do not block the mute operation itself.
+                # This ensures that moderation actions are not lost due to logging issues.
                 pass
 
             return mute_doc
@@ -2318,10 +2319,10 @@ class MongoBackend(AbstractBackend):
 
             return {
                 "course_id": course_id,
-                "scope": scope,
-                "muted_users": muted_users,
+                "requester_id": requester_id,
+                "scope_filter": scope,
                 "total_count": len(muted_users),
-                "backend": "mongodb",
+                "muted_users": muted_users,
             }
 
         except Exception as e:

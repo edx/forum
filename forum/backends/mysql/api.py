@@ -88,6 +88,21 @@ class MySQLBackend(AbstractBackend):
         except ObjectDoesNotExist:
             return None
 
+    @staticmethod
+    def user_has_privileges(user: object) -> bool:
+        """Check if user has any privileges"""
+        # Basic Django privileges
+        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+            return True
+
+        # Check if user has any forum role or course role
+        return (
+            hasattr(user, "role_set")
+            and user.role_set.exists()
+            or hasattr(user, "courseaccessrole_set")
+            and user.courseaccessrole_set.exists()
+        )
+
     @classmethod
     def flag_as_abuse(
         cls, user_id: str, entity_id: str, **kwargs: Any
@@ -2548,16 +2563,14 @@ class MySQLBackend(AbstractBackend):
             if muted_user.pk == muted_by_user.pk:
                 raise ValidationError("Users cannot mute themselves")
 
-            target_is_staff = getattr(muted_user, "is_staff", False)
-            requester_is_staff = getattr(muted_by_user, "is_staff", False)
+            target_is_privileged = cls.user_has_privileges(muted_user)
+            requester_has_privileges = cls.user_has_privileges(muted_by_user)
 
             # Prevent muting of staff and privileged users
-            # Staff cannot mute other staff, and privileged users cannot mute each other
-            target_is_privileged = target_is_staff
             if target_is_privileged:
                 raise ValidationError("Staff and privileged users cannot be muted")
 
-            is_privileged = requester_is_privileged or requester_is_staff
+            is_privileged = requester_is_privileged or requester_has_privileges
 
             # Only privileged users can create course-wide mutes
             if scope == DiscussionMute.Scope.COURSE and not is_privileged:
@@ -2594,6 +2607,7 @@ class MySQLBackend(AbstractBackend):
         except ValidationError as ve:
             raise ValueError(f"Validation error: {ve}") from ve
         except Exception as e:
+            # This prevents silent failures and ensures moderation actions are not lost.
             raise ValueError(f"Failed to mute user: {e}") from e
 
     @classmethod
@@ -2623,6 +2637,12 @@ class MySQLBackend(AbstractBackend):
             muted_user = User.objects.get(pk=int(muted_user_id))
             unmuted_by_user = User.objects.get(pk=int(unmuted_by_id))
 
+            # Determine privilege of the unmuter
+            requester_is_staff = getattr(unmuted_by_user, "is_staff", False)
+            requester_is_privileged = (
+                kwargs.get("requester_is_privileged", False) or requester_is_staff
+            )
+
             # Find the active mute
             mute_query = DiscussionMute.objects.filter(
                 muted_user=muted_user, course_id=course_id, scope=scope, is_active=True
@@ -2635,6 +2655,20 @@ class MySQLBackend(AbstractBackend):
             mute = mute_query.first()
             if not mute:
                 raise ValueError("No active mute found")
+
+            # Backend-side enforcement for defense-in-depth
+            if scope == DiscussionMute.Scope.COURSE:
+                # Only privileged users (staff, instructors, CTAs, moderators) can unmute course-wide mutes
+                if not requester_is_privileged:
+                    raise ValidationError(
+                        "Only privileged users (staff, instructors, CTAs, moderators) can unmute course-wide mutes"
+                    )
+            elif scope == DiscussionMute.Scope.PERSONAL:
+                # Only the original muter can unmute a personal mute
+                if mute.muted_by.pk != unmuted_by_user.pk:
+                    raise ValidationError(
+                        "Only the original muter can unmute a personal mute"
+                    )
 
             # Deactivate the mute
             mute.is_active = False
@@ -2786,14 +2820,16 @@ class MySQLBackend(AbstractBackend):
             - Privileged users: Can see course-wide mutes and all personal mutes
         """
         try:
-            # Only verify staff status if the requester_is_privileged flag is False
+            # Only verify privileges if the requester_is_privileged flag is False
             # (i.e., we weren't explicitly told the user is privileged)
             if requester_id and not requester_is_privileged:
                 try:
                     requester = User.objects.get(pk=int(requester_id))
-                    # Fall back to checking is_staff if flag wasn't set
-                    requester_is_privileged = requester.is_staff
+                    # Use user_has_privileges method for consistent checking
+                    requester_is_privileged = cls.user_has_privileges(requester)
                 except User.DoesNotExist:
+                    # If requester user does not exist, treat as not privileged and continue.
+                    # This prevents errors from breaking the mute listing for non-existent users.
                     pass
 
             query = DiscussionMute.objects.filter(course_id=course_id, is_active=True)
@@ -2844,8 +2880,10 @@ class MySQLBackend(AbstractBackend):
             muted_user = User.objects.get(pk=int(muted_user_id))
             exception_user = User.objects.get(pk=int(exception_user_id))
 
-            if not exception_user.is_staff:
-                raise ValidationError("Only staff users can create mute exceptions")
+            if not cls.user_has_privileges(exception_user):
+                raise ValidationError(
+                    "Only privileged users can create mute exceptions"
+                )
 
             # Prevent creating exception for non-course-wide mutes
             active_course_mute = DiscussionMute.objects.filter(

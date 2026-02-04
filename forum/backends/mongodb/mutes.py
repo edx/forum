@@ -56,6 +56,21 @@ class DiscussionMutes(MongoBaseModel):
                 doc["_id"] = str(doc["_id"])
         return mute_docs
 
+    @staticmethod
+    def user_has_privileges(user: object) -> bool:
+        """Check if user has any privileges"""
+        # Basic Django privileges
+        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+            return True
+
+        # Check if user has any forum role or course role
+        return (
+            hasattr(user, "role_set")
+            and user.role_set.exists()
+            or hasattr(user, "courseaccessrole_set")
+            and user.courseaccessrole_set.exists()
+        )
+
     def create_mute(
         self,
         muted_user_id: str,
@@ -96,16 +111,14 @@ class DiscussionMutes(MongoBaseModel):
             raise ValueError(f"User not found: {e}") from e
 
         # Prevent self-muting
-        if int(muted_user_id) == int(muter_id):
+        if muted_user_id == muter_id:
             raise ValueError("Users cannot mute themselves")
 
-        target_is_staff = getattr(muted_user, "is_staff", False)
-        requester_is_staff = getattr(muter_user, "is_staff", False)
-        is_privileged = requester_is_privileged or requester_is_staff
+        target_is_privileged = self.user_has_privileges(muted_user)
+        requester_has_privileges = self.user_has_privileges(muter_user)
+        is_privileged = requester_is_privileged or requester_has_privileges
 
         # Prevent muting of staff and privileged users
-        # Staff cannot mute other staff, and privileged users cannot mute each other
-        target_is_privileged = target_is_staff
         if target_is_privileged:
             raise ValueError("Staff and privileged users cannot be muted")
 
@@ -228,13 +241,14 @@ class DiscussionMutes(MongoBaseModel):
         """
 
         # Only verify staff status if the requester_is_privileged flag is False
-        # (i.e., we weren't explicitly told the user is privileged)
         if requester_id and not requester_is_privileged:
             try:
                 requester = User.objects.get(pk=int(requester_id))
                 # Fall back to checking is_staff if flag wasn't set
-                requester_is_privileged = getattr(requester, "is_staff", False)
+                requester_is_privileged = self.user_has_privileges(requester)
             except User.DoesNotExist:
+                # If requester user does not exist, treat as not privileged and continue.
+                # This prevents errors from breaking the mute listing for non-existent users.
                 pass
 
         query = {"course_id": course_id, "is_active": True}
@@ -353,30 +367,42 @@ class DiscussionMuteExceptions(MongoBaseModel):
         if not course_mutes:
             raise ValueError("No active course-wide mute found for this user")
 
-        exception_doc = {
+        now = datetime.utcnow()
+        set_on_insert = {
             "_id": ObjectId(),
+            "created_at": now,
+        }
+        set_fields = {
             "muted_user_id": muted_user_id,
             "exception_user_id": exception_user_id,
             "course_id": course_id,
-            "created_at": datetime.utcnow(),
-            "modified_at": datetime.utcnow(),
+            "modified_at": now,
         }
 
-        # Use upsert to handle duplicates gracefully
-        result = self._collection.update_one(
+        # Use upsert to handle duplicates gracefully and avoid immutable _id update error
+        self._collection.update_one(
             {
                 "muted_user_id": muted_user_id,
                 "exception_user_id": exception_user_id,
                 "course_id": course_id,
             },
-            {"$set": exception_doc},
+            {"$set": set_fields, "$setOnInsert": set_on_insert},
             upsert=True,
         )
 
-        if result.upserted_id:
-            exception_doc["_id"] = str(result.upserted_id)
-
-        return exception_doc
+        # Retrieve the upserted or existing document
+        doc = self._collection.find_one(
+            {
+                "muted_user_id": muted_user_id,
+                "exception_user_id": exception_user_id,
+                "course_id": course_id,
+            }
+        )
+        if doc is None:
+            return {}
+        if "_id" in doc:
+            doc["_id"] = str(doc["_id"])
+        return doc
 
     def remove_exception(
         self, muted_user_id: str, exception_user_id: str, course_id: str
