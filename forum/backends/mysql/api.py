@@ -2832,7 +2832,9 @@ class MySQLBackend(AbstractBackend):
                     # This prevents errors from breaking the mute listing for non-existent users.
                     pass
 
-            query = DiscussionMuteRecord.objects.filter(course_id=course_id, is_active=True)
+            query = DiscussionMuteRecord.objects.filter(
+                course_id=course_id, is_active=True
+            )
 
             # Apply scope-based filtering based on requester role
             if requester_is_privileged:

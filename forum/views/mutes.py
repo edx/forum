@@ -370,9 +370,9 @@ class CourseMutedUsersAPIView(APIView):
 
             scope = request.query_params.get("scope", "all")
             # Validate scope (accept 'all' as a special value for this endpoint)
-            valid_scopes = [choice[0] for choice in DiscussionMuteRecord.Scope.choices] + [
-                "all"
-            ]
+            valid_scopes = [
+                choice[0] for choice in DiscussionMuteRecord.Scope.choices
+            ] + ["all"]
             if scope not in valid_scopes:
                 return Response(
                     {
