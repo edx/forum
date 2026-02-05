@@ -9,10 +9,13 @@ from typing import Dict, Optional, Any
 import requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 from opaque_keys.edx.keys import CourseKey
+from rest_framework.serializers import ValidationError
 
 from forum.backends.mysql.models import ModerationAuditLog
+from forum.utils import ForumV2RequestError
 
 User = get_user_model()
 log = logging.getLogger(__name__)
@@ -218,6 +221,7 @@ class AIModerationService:
         # pylint: disable=import-outside-toplevel
         from forum.toggles import (
             is_ai_moderation_enabled,
+            is_ai_auto_delete_spam_enabled,
         )
 
         course_key = CourseKey.from_string(course_id) if course_id else None
@@ -246,16 +250,21 @@ class AIModerationService:
         )
 
         if is_spam:
+            # Flag content as spam and abuse first
             try:
                 content_instance["is_spam"] = True
 
-                self._mark_as_spam_and_flag_abuse(content_instance, backend)
-
+                self._mark_as_spam_and_moderate(content_instance, backend)
                 result["actions_taken"] = ["flagged"]
                 result["flagged"] = True
             except (AttributeError, ValueError, TypeError) as e:
                 log.error(f"Failed to flag content as spam: {e}")
                 result["actions_taken"] = ["no_action"]
+
+            # Delete content after flagging to ensure it is removed from public view immediately
+            if is_ai_auto_delete_spam_enabled(course_key):  # type: ignore[no-untyped-call]
+                self._delete_content(content_instance)
+                result["actions_taken"] = result["actions_taken"] + ["soft_deleted"]  # type: ignore[operator]
         else:
             result["actions_taken"] = ["no_action"]
 
@@ -269,7 +278,7 @@ class AIModerationService:
             )
         return result
 
-    def _mark_as_spam_and_flag_abuse(self, content_instance: Any, backend: Any) -> None:
+    def _mark_as_spam_and_moderate(self, content_instance: Any, backend: Any) -> None:
         """Flag content as abuse using backend methods."""
         content_id = str(content_instance.get("_id"))
         content_type = str(content_instance.get("_type"))
@@ -287,6 +296,45 @@ class AIModerationService:
             )
         except (AttributeError, ValueError, TypeError, ImportError) as e:
             log.error(f"Failed to flag content via backend: {e}")
+
+    def _delete_content(self, content_instance: Any) -> None:
+        """
+        Soft delete content using API layer delete functions.
+
+        Uses the API layer which handles all business logic including:
+        - Content validation
+        - Soft deletion
+        - Stats updates
+        - Subscription cleanup (for threads)
+        - Anonymous content handling
+
+        Args:
+            content_instance: Dict containing content data including _id, _type, and course_id
+        """
+        # Import here to avoid circular dependency (api modules import from ai_moderation)
+        # pylint: disable=import-outside-toplevel,cyclic-import
+        from forum.api.comments import delete_comment
+        from forum.api.threads import delete_thread
+
+        content_id = str(content_instance.get("_id"))
+        content_type = str(content_instance.get("_type"))
+        course_id = content_instance.get("course_id")
+        deleted_by = (
+            str(self.ai_moderation_user_id) if self.ai_moderation_user_id else None
+        )
+
+        try:
+            # Use API layer functions which handle all business logic
+            if content_type == "CommentThread":
+                delete_thread(content_id, course_id=course_id, deleted_by=deleted_by)
+                log.info(f"AI Moderation Deleted CommentThread: {content_id}")
+            elif content_type == "Comment":
+                delete_comment(content_id, course_id=course_id, deleted_by=deleted_by)
+                log.info(f"AI Moderation Deleted Comment: {content_id}")
+        except (ForumV2RequestError, ObjectDoesNotExist, ValidationError) as e:
+            log.error(
+                f"AI Moderation Failed to delete {content_type} {content_id}: {e}"
+            )
 
 
 # Global instance
