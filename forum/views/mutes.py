@@ -17,7 +17,7 @@ from forum.api.mutes import (
     mute_user,
     unmute_user,
 )
-from forum.backends.mysql.models import DiscussionMute
+from forum.backends.mysql.models import DiscussionMuteRecord
 from forum.serializers.mute import (
     MuteAndReportInputSerializer,
     MuteInputSerializer,
@@ -370,7 +370,7 @@ class CourseMutedUsersAPIView(APIView):
 
             scope = request.query_params.get("scope", "all")
             # Validate scope (accept 'all' as a special value for this endpoint)
-            valid_scopes = [choice[0] for choice in DiscussionMute.Scope.choices] + [
+            valid_scopes = [choice[0] for choice in DiscussionMuteRecord.Scope.choices] + [
                 "all"
             ]
             if scope not in valid_scopes:

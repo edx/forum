@@ -941,7 +941,7 @@ class ModerationAuditLog(models.Model):
         ]
 
 
-class DiscussionMute(models.Model):
+class DiscussionMuteRecord(models.Model):
     """
     Tracks muted users in discussions.
     A mute can be personal or course-wide.
@@ -1117,10 +1117,10 @@ class DiscussionMuteException(models.Model):
     def clean(self) -> None:
         """Ensure exception is only created if a course-wide mute is active."""
 
-        has_coursewide_mute = DiscussionMute.objects.filter(
+        has_coursewide_mute = DiscussionMuteRecord.objects.filter(
             muted_user=self.muted_user,
             course_id=self.course_id,
-            scope=DiscussionMute.Scope.COURSE,
+            scope=DiscussionMuteRecord.Scope.COURSE,
             is_active=True,
         ).exists()
 

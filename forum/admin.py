@@ -15,7 +15,7 @@ from forum.models import (
     Subscription,
     MongoContent,
     ModerationAuditLog,
-    DiscussionMute,
+    DiscussionMuteRecord,
     DiscussionMuteException,
 )
 
@@ -151,9 +151,9 @@ class SubscriptionAdmin(admin.ModelAdmin):  # type: ignore
     list_filter = ("source_content_type",)
 
 
-@admin.register(DiscussionMute)
+@admin.register(DiscussionMuteRecord)
 class DiscussionMuteAdmin(admin.ModelAdmin):  # type: ignore
-    """Admin interface for DiscussionMute model."""
+    """Admin interface for DiscussionMuteRecord model."""
 
     list_display = (
         "muted_user",

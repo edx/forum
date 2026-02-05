@@ -32,7 +32,7 @@ from forum.backends.mysql.models import (
     Comment,
     CommentThread,
     CourseStat,
-    DiscussionMute,
+    DiscussionMuteRecord,
     DiscussionMuteException,
     EditHistory,
     ForumUser,
@@ -2573,24 +2573,24 @@ class MySQLBackend(AbstractBackend):
             is_privileged = requester_is_privileged or requester_has_privileges
 
             # Only privileged users can create course-wide mutes
-            if scope == DiscussionMute.Scope.COURSE and not is_privileged:
+            if scope == DiscussionMuteRecord.Scope.COURSE and not is_privileged:
                 raise ValidationError(
                     "Only privileged users (staff, instructors, CTAs, moderators) "
                     "can create course-wide mutes"
                 )
 
             # Check if mute already exists
-            existing_mute = DiscussionMute.objects.filter(
+            existing_mute = DiscussionMuteRecord.objects.filter(
                 muted_user=muted_user, course_id=course_id, scope=scope, is_active=True
             )
-            if scope == DiscussionMute.Scope.PERSONAL:
+            if scope == DiscussionMuteRecord.Scope.PERSONAL:
                 existing_mute = existing_mute.filter(muted_by=muted_by_user)
 
             if existing_mute.exists():
                 raise ValidationError("User is already muted in this scope")
 
             # Create and validate the mute
-            mute = DiscussionMute(
+            mute = DiscussionMuteRecord(
                 muted_user=muted_user,
                 muted_by=muted_by_user,
                 course_id=course_id,
@@ -2644,11 +2644,11 @@ class MySQLBackend(AbstractBackend):
             )
 
             # Find the active mute
-            mute_query = DiscussionMute.objects.filter(
+            mute_query = DiscussionMuteRecord.objects.filter(
                 muted_user=muted_user, course_id=course_id, scope=scope, is_active=True
             )
 
-            if scope == DiscussionMute.Scope.PERSONAL and muter_id:
+            if scope == DiscussionMuteRecord.Scope.PERSONAL and muter_id:
                 muted_by_user = User.objects.get(pk=int(muter_id))
                 mute_query = mute_query.filter(muted_by=muted_by_user)
 
@@ -2657,13 +2657,13 @@ class MySQLBackend(AbstractBackend):
                 raise ValueError("No active mute found")
 
             # Backend-side enforcement for defense-in-depth
-            if scope == DiscussionMute.Scope.COURSE:
+            if scope == DiscussionMuteRecord.Scope.COURSE:
                 # Only privileged users (staff, instructors, CTAs, moderators) can unmute course-wide mutes
                 if not requester_is_privileged:
                     raise ValidationError(
                         "Only privileged users (staff, instructors, CTAs, moderators) can unmute course-wide mutes"
                     )
-            elif scope == DiscussionMute.Scope.PERSONAL:
+            elif scope == DiscussionMuteRecord.Scope.PERSONAL:
                 # Only the original muter can unmute a personal mute
                 if mute.muted_by.pk != unmuted_by_user.pk:
                     raise ValidationError(
@@ -2755,18 +2755,18 @@ class MySQLBackend(AbstractBackend):
             )
 
             # Check for active mutes
-            personal_mutes = DiscussionMute.objects.filter(
+            personal_mutes = DiscussionMuteRecord.objects.filter(
                 muted_user=user,
                 muted_by=viewer,
                 course_id=course_id,
-                scope=DiscussionMute.Scope.PERSONAL,
+                scope=DiscussionMuteRecord.Scope.PERSONAL,
                 is_active=True,
             )
 
-            course_mutes = DiscussionMute.objects.filter(
+            course_mutes = DiscussionMuteRecord.objects.filter(
                 muted_user=user,
                 course_id=course_id,
-                scope=DiscussionMute.Scope.COURSE,
+                scope=DiscussionMuteRecord.Scope.COURSE,
                 is_active=True,
             )
 
@@ -2832,23 +2832,23 @@ class MySQLBackend(AbstractBackend):
                     # This prevents errors from breaking the mute listing for non-existent users.
                     pass
 
-            query = DiscussionMute.objects.filter(course_id=course_id, is_active=True)
+            query = DiscussionMuteRecord.objects.filter(course_id=course_id, is_active=True)
 
             # Apply scope-based filtering based on requester role
             if requester_is_privileged:
                 # Privileged users can see all mutes based on scope requested
                 if scope == "personal":
                     # Show only personal mutes
-                    query = query.filter(scope=DiscussionMute.Scope.PERSONAL)
+                    query = query.filter(scope=DiscussionMuteRecord.Scope.PERSONAL)
                 elif scope == "course":
                     # Show only course-wide mutes
-                    query = query.filter(scope=DiscussionMute.Scope.COURSE)
+                    query = query.filter(scope=DiscussionMuteRecord.Scope.COURSE)
                 # For "all" scope, show both personal and course mutes (no additional filter)
             else:
                 # Learners can only see their own personal mutes
                 if requester_id:
                     query = query.filter(
-                        scope=DiscussionMute.Scope.PERSONAL,
+                        scope=DiscussionMuteRecord.Scope.PERSONAL,
                         muted_by__pk=int(requester_id),
                     )
                 else:
@@ -2886,10 +2886,10 @@ class MySQLBackend(AbstractBackend):
                 )
 
             # Prevent creating exception for non-course-wide mutes
-            active_course_mute = DiscussionMute.objects.filter(
+            active_course_mute = DiscussionMuteRecord.objects.filter(
                 muted_user=muted_user,
                 course_id=course_id,
-                scope=DiscussionMute.Scope.COURSE,
+                scope=DiscussionMuteRecord.Scope.COURSE,
                 is_active=True,
             ).first()
             if not active_course_mute:
@@ -2932,7 +2932,7 @@ class MySQLBackend(AbstractBackend):
     ) -> list[dict[str, Any]]:
         """Get list of users muted by a moderator."""
         try:
-            queryset = DiscussionMute.objects.filter(
+            queryset = DiscussionMuteRecord.objects.filter(
                 course_id=course_id, muted_by=moderator_id, scope=scope
             )
             if active_only:

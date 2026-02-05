@@ -2,8 +2,7 @@
 """Model util function for db operations."""
 
 import math
-from datetime import datetime
-from datetime import timezone as dt_timezone
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from bson import ObjectId
@@ -14,7 +13,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from forum.backends.backend import AbstractBackend
 from forum.backends.mongodb.comments import Comment
 from forum.backends.mongodb.contents import Contents
-from forum.backends.mongodb.mutes import DiscussionMuteExceptions, DiscussionMutes
+from forum.backends.mongodb.mutes import DiscussionMuteException, DiscussionMuteRecord
 from forum.backends.mongodb.subscriptions import Subscriptions
 from forum.backends.mongodb.threads import CommentThread
 from forum.backends.mongodb.users import Users
@@ -1363,7 +1362,7 @@ class MongoBackend(AbstractBackend):
 
         read_state["last_read_times"].update(
             {
-                str(thread["_id"]): datetime.now(dt_timezone.utc),
+                str(thread["_id"]): datetime.now(timezone.utc),
             }
         )
         update_user = Users().get(user["external_id"])
@@ -2070,10 +2069,10 @@ class MongoBackend(AbstractBackend):
             Dictionary containing mute record data
         """
         try:
-            mutes = DiscussionMutes()
+            mutes = DiscussionMuteRecord()
 
             # Create the mute record
-            mute_doc = mutes.create_mute(
+            mute_doc = mutes.mute_user(
                 muted_user_id=muted_user_id,
                 muter_id=muter_id,
                 course_id=course_id,
@@ -2087,7 +2086,7 @@ class MongoBackend(AbstractBackend):
                 muter = User.objects.get(id=muter_id)
                 muted_user = User.objects.get(id=muted_user_id)
                 audit_log = ModerationAuditLog(
-                    timestamp=datetime.now(dt_timezone.utc),
+                    timestamp=datetime.now(timezone.utc),
                     body=f"User muted: {muted_user_id}",
                     classifier_output={
                         "action_type": "mute",
@@ -2139,10 +2138,10 @@ class MongoBackend(AbstractBackend):
             Dictionary containing unmute result
         """
         try:
-            mutes = DiscussionMutes()
+            mutes = DiscussionMuteRecord()
 
             # Deactivate the mute
-            result = mutes.deactivate_mutes(
+            result = mutes.unmute_user(
                 muted_user_id=muted_user_id,
                 unmuted_by_id=unmuted_by_id,
                 course_id=course_id,
@@ -2155,7 +2154,7 @@ class MongoBackend(AbstractBackend):
                 unmuter = User.objects.get(id=unmuted_by_id)
                 muted_user = User.objects.get(id=muted_user_id)
                 audit_log = ModerationAuditLog(
-                    timestamp=datetime.now(dt_timezone.utc),
+                    timestamp=datetime.now(timezone.utc),
                     body=f"User unmuted: {muted_user_id}",
                     classifier_output={
                         "action_type": "unmute",
@@ -2220,7 +2219,7 @@ class MongoBackend(AbstractBackend):
                 muter = User.objects.get(id=muter_id)
                 muted_user = User.objects.get(id=muted_user_id)
                 audit_log = ModerationAuditLog(
-                    timestamp=datetime.now(dt_timezone.utc),
+                    timestamp=datetime.now(timezone.utc),
                     body=f"User muted and reported: {muted_user_id}",
                     classifier_output={
                         "action_type": "mute_and_report",
@@ -2273,7 +2272,7 @@ class MongoBackend(AbstractBackend):
             Dictionary containing mute status information
         """
         try:
-            mutes = DiscussionMutes()
+            mutes = DiscussionMuteRecord()
             return mutes.get_user_mute_status(
                 user_id=muted_user_id,
                 course_id=course_id,
@@ -2309,7 +2308,7 @@ class MongoBackend(AbstractBackend):
             - Staff: Can see course-wide mutes and all personal mutes
         """
         try:
-            mutes = DiscussionMutes()
+            mutes = DiscussionMuteRecord()
             muted_users = mutes.get_all_muted_users_for_course(
                 course_id=course_id,
                 requester_id=requester_id,
@@ -2350,7 +2349,7 @@ class MongoBackend(AbstractBackend):
             List of muted user records
         """
         try:
-            mutes_model = DiscussionMutes()
+            mutes_model = DiscussionMuteRecord()
 
             if scope == "all":
                 # Get all muted users for the course, filtering by moderator for personal mutes
@@ -2427,8 +2426,8 @@ class MongoBackend(AbstractBackend):
             Dictionary containing exception data
         """
         try:
-            exceptions_model = DiscussionMuteExceptions()
-            exception_doc = exceptions_model.create_exception(
+            exceptions_model = DiscussionMuteException()
+            exception_doc = exceptions_model.create_mute_exception(
                 muted_user_id=muted_user_id,
                 exception_user_id=exception_user_id,
                 course_id=course_id,

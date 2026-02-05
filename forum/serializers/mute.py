@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 from rest_framework import serializers
 
-from forum.models import DiscussionMute, DiscussionMuteException
+from forum.models import DiscussionMuteRecord, DiscussionMuteException
 
 
 class MuteInputSerializer(serializers.Serializer[Dict[str, Any]]):
@@ -16,8 +16,8 @@ class MuteInputSerializer(serializers.Serializer[Dict[str, Any]]):
         required=True, help_text="ID of user performing the mute action"
     )
     scope = serializers.ChoiceField(
-        choices=DiscussionMute.Scope.choices,
-        default=DiscussionMute.Scope.PERSONAL,
+        choices=DiscussionMuteRecord.Scope.choices,
+        default=DiscussionMuteRecord.Scope.PERSONAL,
         help_text="Scope of the mute (personal or course-wide)",
     )
     reason = serializers.CharField(
@@ -40,8 +40,8 @@ class UnmuteInputSerializer(serializers.Serializer[Dict[str, Any]]):
         required=True, help_text="ID of user performing the unmute action"
     )
     scope = serializers.ChoiceField(
-        choices=DiscussionMute.Scope.choices,
-        default=DiscussionMute.Scope.PERSONAL,
+        choices=DiscussionMuteRecord.Scope.choices,
+        default=DiscussionMuteRecord.Scope.PERSONAL,
         help_text="Scope of the unmute (personal or course-wide)",
     )
     muter_id = serializers.CharField(
@@ -63,8 +63,8 @@ class MuteAndReportInputSerializer(serializers.Serializer[Dict[str, Any]]):
     """Serializer for mute and report input data."""
 
     scope = serializers.ChoiceField(
-        choices=DiscussionMute.Scope.choices,
-        default=DiscussionMute.Scope.PERSONAL,
+        choices=DiscussionMuteRecord.Scope.choices,
+        default=DiscussionMuteRecord.Scope.PERSONAL,
         help_text="Scope of the mute (personal or course-wide)",
     )
     reason = serializers.CharField(
@@ -171,8 +171,8 @@ class CourseMutedUsersSerializer(serializers.Serializer[Dict[str, Any]]):
         )
 
 
-class DiscussionMuteSerializer(serializers.ModelSerializer[DiscussionMute]):
-    """Serializer for DiscussionMute model."""
+class DiscussionMuteSerializer(serializers.ModelSerializer[DiscussionMuteRecord]):
+    """Serializer for DiscussionMuteRecord model."""
 
     muted_user_id = serializers.CharField(source="muted_user.pk", read_only=True)
     muted_user_username = serializers.CharField(
@@ -190,7 +190,7 @@ class DiscussionMuteSerializer(serializers.ModelSerializer[DiscussionMute]):
     )
 
     class Meta:
-        model = DiscussionMute
+        model = DiscussionMuteRecord
         fields = [
             "id",
             "muted_user_id",

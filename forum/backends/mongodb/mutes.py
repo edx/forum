@@ -11,7 +11,7 @@ from forum.backends.mongodb.base_model import MongoBaseModel
 User = get_user_model()
 
 
-class DiscussionMutes(MongoBaseModel):
+class DiscussionMuteRecord(MongoBaseModel):
     """
     MongoDB model for discussion user mutes.
     Supports both personal and course-wide mutes.
@@ -71,7 +71,7 @@ class DiscussionMutes(MongoBaseModel):
             and user.courseaccessrole_set.exists()
         )
 
-    def create_mute(
+    def mute_user(
         self,
         muted_user_id: str,
         muter_id: str,
@@ -162,7 +162,7 @@ class DiscussionMutes(MongoBaseModel):
         except DuplicateKeyError as e:
             raise ValueError("Duplicate mute record") from e
 
-    def deactivate_mutes(
+    def unmute_user(
         self,
         muted_user_id: str,
         unmuted_by_id: str,
@@ -332,11 +332,11 @@ class DiscussionMutes(MongoBaseModel):
         Returns:
             True if exception exists, False otherwise
         """
-        exceptions_model = DiscussionMuteExceptions()
+        exceptions_model = DiscussionMuteException()
         return exceptions_model.has_exception(muted_user_id, viewer_id, course_id)
 
 
-class DiscussionMuteExceptions(MongoBaseModel):
+class DiscussionMuteException(MongoBaseModel):
     """
     MongoDB model for course-wide mute exceptions.
     Allows specific users to unmute course-wide muted users for themselves.
@@ -344,7 +344,7 @@ class DiscussionMuteExceptions(MongoBaseModel):
 
     COLLECTION_NAME: str = "discussion_mute_exceptions"
 
-    def create_exception(
+    def create_mute_exception(
         self, muted_user_id: str, exception_user_id: str, course_id: str
     ) -> Dict[str, Any]:
         """
@@ -359,7 +359,7 @@ class DiscussionMuteExceptions(MongoBaseModel):
             Created exception document
         """
         # Check if course-wide mute exists
-        mutes_model = DiscussionMutes()
+        mutes_model = DiscussionMuteRecord()
         course_mutes = mutes_model.get_active_mutes(
             muted_user_id=muted_user_id, course_id=course_id, scope="course"
         )
