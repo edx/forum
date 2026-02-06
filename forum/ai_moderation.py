@@ -261,10 +261,13 @@ class AIModerationService:
                 log.error(f"Failed to flag content as spam: {e}")
                 result["actions_taken"] = ["no_action"]
 
-            # Delete content after flagging to ensure it is removed from public view immediately
-            if is_ai_auto_delete_spam_enabled(course_key):  # type: ignore[no-untyped-call]
-                self._delete_content(content_instance)
-                result["actions_taken"] = result["actions_taken"] + ["soft_deleted"]  # type: ignore[operator]
+            # Only attempt deletion if flagging succeeded
+            if is_ai_auto_delete_spam_enabled(course_key) and result["flagged"]:  # type: ignore[no-untyped-call]
+                try:
+                    self._delete_content(content_instance)
+                    result["actions_taken"] = result["actions_taken"] + ["soft_deleted"]  # type: ignore[operator]
+                except (ForumV2RequestError, ObjectDoesNotExist, ValidationError) as e:
+                    log.error(f"Failed to delete content after flagging: {e}")
         else:
             result["actions_taken"] = ["no_action"]
 
@@ -287,15 +290,10 @@ class AIModerationService:
                 "CommentThread" if content_type == "CommentThread" else "Comment"
             )
         }
-        try:
-            if not self.ai_moderation_user_id:
-                raise ValueError("AI_MODERATION_USER_ID setting is not configured.")
-            backend.flag_content_as_spam(content_type, content_id)
-            backend.flag_as_abuse(
-                str(self.ai_moderation_user_id), content_id, **extra_data
-            )
-        except (AttributeError, ValueError, TypeError, ImportError) as e:
-            log.error(f"Failed to flag content via backend: {e}")
+        if not self.ai_moderation_user_id:
+            raise ValueError("AI_MODERATION_USER_ID setting is not configured.")
+        backend.flag_content_as_spam(content_type, content_id)
+        backend.flag_as_abuse(str(self.ai_moderation_user_id), content_id, **extra_data)
 
     def _delete_content(self, content_instance: Any) -> None:
         """
