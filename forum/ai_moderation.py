@@ -321,18 +321,14 @@ class AIModerationService:
             str(self.ai_moderation_user_id) if self.ai_moderation_user_id else None
         )
 
-        try:
-            # Use API layer functions which handle all business logic
-            if content_type == "CommentThread":
-                delete_thread(content_id, course_id=course_id, deleted_by=deleted_by)
-                log.info(f"AI Moderation Deleted CommentThread: {content_id}")
-            elif content_type == "Comment":
-                delete_comment(content_id, course_id=course_id, deleted_by=deleted_by)
-                log.info(f"AI Moderation Deleted Comment: {content_id}")
-        except (ForumV2RequestError, ObjectDoesNotExist, ValidationError) as e:
-            log.error(
-                f"AI Moderation Failed to delete {content_type} {content_id}: {e}"
-            )
+        # Use API layer functions which handle all business logic
+        # Exceptions propagate to caller for proper error handling
+        if content_type == "CommentThread":
+            delete_thread(content_id, course_id=course_id, deleted_by=deleted_by)
+            log.info(f"AI Moderation Deleted CommentThread: {content_id}")
+        elif content_type == "Comment":
+            delete_comment(content_id, course_id=course_id, deleted_by=deleted_by)
+            log.info(f"AI Moderation Deleted Comment: {content_id}")
 
 
 # Global instance

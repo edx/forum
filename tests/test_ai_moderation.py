@@ -394,12 +394,13 @@ class TestDeleteContentMethod:  # pylint: disable=redefined-outer-name,protected
         ai_service: AIModerationService,
         sample_thread_content: dict[str, Any],
     ) -> None:
-        """Test that deletion errors are handled gracefully."""
+        """Test that deletion errors propagate to caller."""
         with patch("forum.api.threads.delete_thread") as mock_delete_thread:
             mock_delete_thread.side_effect = ForumV2RequestError("API Error")
 
-            # Should not raise exception
-            ai_service._delete_content(sample_thread_content)
+            # Should raise exception to caller
+            with pytest.raises(ForumV2RequestError):
+                ai_service._delete_content(sample_thread_content)
 
 
 class TestModerateAndFlagSpamFunction:  # pylint: disable=redefined-outer-name
