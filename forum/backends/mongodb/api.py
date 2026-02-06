@@ -2309,7 +2309,7 @@ class MongoBackend(AbstractBackend):
         """
         try:
             mutes = DiscussionMuteRecord()
-            muted_users = mutes.get_all_muted_users_for_course(
+            muted_users = mutes.fetch_muted_users_for_course(
                 course_id=course_id,
                 requester_id=requester_id,
                 scope=scope,
@@ -2353,7 +2353,7 @@ class MongoBackend(AbstractBackend):
 
             if scope == "all":
                 # Get all muted users for the course, filtering by moderator for personal mutes
-                all_mutes = mutes_model.get_all_muted_users_for_course(
+                all_mutes = mutes_model.fetch_muted_users_for_course(
                     course_id=course_id,
                     requester_id=moderator_id,
                     scope="all",
@@ -2368,7 +2368,7 @@ class MongoBackend(AbstractBackend):
                 ]
             else:
                 # Get muted users for specific scope
-                muted_users = mutes_model.get_all_muted_users_for_course(
+                muted_users = mutes_model.fetch_muted_users_for_course(
                     course_id=course_id,
                     requester_id=moderator_id if scope == "personal" else None,
                     scope=scope,

@@ -216,7 +216,7 @@ class DiscussionMuteRecord(MongoBaseModel):
             "modified_count": result.modified_count,
         }
 
-    def get_all_muted_users_for_course(
+    def fetch_muted_users_for_course(
         self,
         course_id: str,
         requester_id: Optional[str] = None,
@@ -244,7 +244,6 @@ class DiscussionMuteRecord(MongoBaseModel):
         if requester_id and not requester_is_privileged:
             try:
                 requester = User.objects.get(pk=int(requester_id))
-                # Fall back to checking is_staff if flag wasn't set
                 requester_is_privileged = self.user_has_privileges(requester)
             except User.DoesNotExist:
                 # If requester user does not exist, treat as not privileged and continue.
