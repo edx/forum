@@ -250,6 +250,42 @@ class TestGetBannedUsersAPI:
         assert len(org_bans) == 1
         assert org_bans[0]["user"]["username"] == "another_learner"
 
+    def test_get_banned_users_excludes_org_bans_with_course_exceptions(
+        self, test_users, test_course_keys
+    ):
+        """Test that org-level bans with course exceptions are excluded from course's banned users list."""
+        # Create org-level ban
+        ban = forum_api.ban_user(
+            user=test_users["learner"],
+            banned_by=test_users["moderator"],
+            course_id=test_course_keys["course1"],
+            scope="organization",
+            reason="Org-wide ban",
+        )
+        ban_id = ban["id"]
+
+        # Initially, user should appear in banned users list for course1
+        result = forum_api.get_banned_users(course_id=test_course_keys["course1"])
+        assert len(result) == 1
+        assert result[0]["user"]["username"] == "learner"
+
+        # Create course exception (simulating course-level unban of org ban)
+        DiscussionBanException.objects.create(
+            ban_id=ban_id,
+            course_id=test_course_keys["course1"],
+            unbanned_by=test_users["moderator"],
+            reason="Exception for course1",
+        )
+
+        # Now user should NOT appear in banned users list for course1
+        result = forum_api.get_banned_users(course_id=test_course_keys["course1"])
+        assert len(result) == 0
+
+        # But should still appear for course2 (no exception there)
+        result = forum_api.get_banned_users(course_id=test_course_keys["course2"])
+        assert len(result) == 1
+        assert result[0]["user"]["username"] == "learner"
+
 
 @pytest.mark.django_db
 class TestGetBanAPI:

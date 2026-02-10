@@ -358,7 +358,7 @@ def get_banned_users(
         scope: Filter by scope ('course' or 'organization')
 
     Returns:
-        list: List of ban records
+        list: List of ban records (excludes org-level bans with exceptions for the course)
     """
     queryset = DiscussionBan.objects.select_related("user", "banned_by", "unbanned_by")
 
@@ -395,7 +395,30 @@ def get_banned_users(
 
     queryset = queryset.order_by("-banned_at")
 
-    return [_serialize_ban(ban) for ban in queryset]
+    bans = list(queryset)
+
+    # Filter out org-level bans that have exceptions for the requested course
+    # When a user with an org-level ban is "unbanned" at the course level, an exception
+    # is created that allows them in that specific course while keeping the org ban active.
+    # For course-specific banned user lists, we exclude org bans with exceptions since
+    # those users are effectively not banned in that particular course.
+    if course_id:
+        # course_key is already defined from the earlier if course_id block
+        filtered_bans = []
+        for ban in bans:
+            # Keep course-level bans as-is
+            if ban.scope == "course":
+                filtered_bans.append(ban)
+            # For org-level bans, only include if there's NO exception for this course
+            elif ban.scope == "organization":
+                has_exception = DiscussionBanException.objects.filter(
+                    ban=ban, course_id=course_key
+                ).exists()
+                if not has_exception:
+                    filtered_bans.append(ban)
+        return [_serialize_ban(ban) for ban in filtered_bans]
+
+    return [_serialize_ban(ban) for ban in bans]
 
 
 def get_ban(
@@ -565,14 +588,18 @@ def get_user_ban_scope(user, course_id):
 
 def get_banned_usernames(course_id=None, org_key=None):
     """
-    Get set of banned usernames for filtering.
+    Get set of banned usernames for filtering from the learners list.
+
+    This function is used to exclude banned users from the "All Other Learners" list.
+    ALL banned users (including staff if mistakenly banned) are returned so they
+    are properly excluded from the learners list and appear only in "Banned Users" section.
 
     Args:
         course_id: CourseKey or string (optional)
         org_key: Organization key string (optional)
 
     Returns:
-        set: Set of banned usernames
+        set: Set of banned usernames (includes all banned users)
     """
     queryset = DiscussionBan.objects.filter(is_active=True)
 

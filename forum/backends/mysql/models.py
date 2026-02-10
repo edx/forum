@@ -1199,9 +1199,11 @@ class DiscussionBan(TimeStampedModel):
         Check if user is banned from discussions.
 
         Priority:
-        1. Check for course-level exception to org ban (allows user)
-        2. Organization-level ban (applies to all courses in org)
-        3. Course-level ban (applies to specific course)
+        1. Active course-level ban (most specific - overrides everything)
+        2. Organization-level ban with exceptions (broader scope)
+
+        Note: Inactive course-level bans do NOT prevent org-level bans from applying.
+        Unbanning at course level only removes that specific course ban, not org bans.
 
         Args:
             user: User object
@@ -1218,7 +1220,14 @@ class DiscussionBan(TimeStampedModel):
         if isinstance(course_id, str):
             course_id = CourseKey.from_string(course_id)
 
-        # Check organization-level ban first (higher priority)
+        # Check for ACTIVE course-level ban first (highest priority)
+        # Only active bans matter - inactive bans don't prevent org-level bans
+        if cls.objects.filter(
+            user=user, course_id=course_id, scope=cls.SCOPE_COURSE, is_active=True
+        ).exists():
+            return True
+
+        # Check organization-level ban (lower priority)
         if check_org:
             # Try to get organization from CourseOverview, fallback to CourseKey
             try:
@@ -1258,12 +1267,6 @@ class DiscussionBan(TimeStampedModel):
                     return False
                 # Org ban applies, no exception
                 return True
-
-        # Check course-level ban
-        if cls.objects.filter(
-            user=user, course_id=course_id, scope=cls.SCOPE_COURSE, is_active=True
-        ).exists():
-            return True
 
         return False
 
