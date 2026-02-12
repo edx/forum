@@ -128,6 +128,19 @@ def ban_user(
             ban.save()
             reactivated = True
 
+        # Clean up orphaned exceptions when creating/reactivating org-level bans
+        # This prevents situations where a user is re-banned at org level but
+        # still has exceptions from previous bans that should no longer apply
+        if (created or reactivated) and scope == "organization":
+            deleted_count = DiscussionBanException.objects.filter(ban=ban).delete()[0]
+            if deleted_count > 0:
+                log.info(
+                    "Cleaned up %d orphaned exception(s) for org ban: ban_id=%s, user_id=%s",
+                    deleted_count,
+                    ban.id,
+                    banned_user.id,
+                )
+
         # Create audit log
         ModerationAuditLog.objects.create(
             action_type=ModerationAuditLog.ACTION_BAN,

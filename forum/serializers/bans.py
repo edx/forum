@@ -125,6 +125,12 @@ class BannedUsersListSerializer(serializers.Serializer):
     include_inactive = serializers.BooleanField(
         default=False, help_text="Include inactive (unbanned) users"
     )
+    scope = serializers.ChoiceField(
+        choices=["course", "organization"],
+        required=False,
+        allow_null=True,
+        help_text="Filter by ban scope: 'course' or 'organization'",
+    )
 
     def create(self, validated_data):
         """Not implemented - read-only serializer."""
