@@ -2,27 +2,21 @@
 Serializers for discussion ban operations.
 """
 
-# mypy: ignore-errors
+from typing import Any
 
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
+User = get_user_model()
 
-class BanUserSerializer(serializers.Serializer):
+
+class BanUserSerializer(serializers.Serializer):  # type: ignore[type-arg]
     """
     Serializer for banning a user from discussions.
     """
 
-    user_id = serializers.CharField(required=True, help_text="ID of the user to ban")
-
-    def create(self, validated_data):
-        """Not implemented - use API function instead."""
-        raise NotImplementedError("Use ban_user() API function instead")
-
-    def update(self, instance, validated_data):
-        """Not implemented - bans are created, not updated."""
-        raise NotImplementedError("Bans cannot be updated")
-
-    banned_by_id = serializers.CharField(
+    user_id = serializers.IntegerField(required=True, help_text="ID of the user to ban")
+    banned_by_id = serializers.IntegerField(
         required=True, help_text="ID of the moderator performing the ban"
     )
     course_id = serializers.CharField(
@@ -40,7 +34,31 @@ class BanUserSerializer(serializers.Serializer):
         required=False, allow_blank=True, help_text="Reason for the ban (optional)"
     )
 
-    def validate(self, attrs):
+    def create(self, validated_data: dict[str, Any]) -> Any:
+        """Not implemented - use API function instead."""
+        raise NotImplementedError("Use ban_user() API function instead")
+
+    def update(self, instance: Any, validated_data: dict[str, Any]) -> Any:
+        """Not implemented - bans are created, not updated."""
+        raise NotImplementedError("Bans cannot be updated")
+
+    def validate_user_id(self, value: int) -> int:
+        """Validate that the user exists."""
+        try:
+            User.objects.get(id=value)
+        except User.DoesNotExist as exc:
+            raise serializers.ValidationError("User not found") from exc
+        return value
+
+    def validate_banned_by_id(self, value: int) -> int:
+        """Validate that the moderator exists."""
+        try:
+            User.objects.get(id=value)
+        except User.DoesNotExist as exc:
+            raise serializers.ValidationError("Moderator user not found") from exc
+        return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         """Validate that required fields are present based on scope."""
         scope = attrs.get("scope", "course")
 
@@ -57,22 +75,30 @@ class BanUserSerializer(serializers.Serializer):
         return attrs
 
 
-class UnbanUserSerializer(serializers.Serializer):
+class UnbanUserSerializer(serializers.Serializer):  # type: ignore[type-arg]
     """
     Serializer for unbanning a user from discussions.
     """
 
-    unbanned_by_id = serializers.CharField(
+    unbanned_by_id = serializers.IntegerField(
         required=True, help_text="ID of the moderator performing the unban"
     )
 
-    def create(self, validated_data):
+    def create(self, validated_data: dict[str, Any]) -> Any:
         """Not implemented - use API function instead."""
         raise NotImplementedError("Use unban_user() API function instead")
 
-    def update(self, instance, validated_data):
+    def update(self, instance: Any, validated_data: dict[str, Any]) -> Any:
         """Not implemented - use API function instead."""
         raise NotImplementedError("Use unban_user() API function instead")
+
+    def validate_unbanned_by_id(self, value: int) -> int:
+        """Validate that the moderator exists."""
+        try:
+            User.objects.get(id=value)
+        except User.DoesNotExist as exc:
+            raise serializers.ValidationError("Moderator user not found") from exc
+        return value
 
     course_id = serializers.CharField(
         required=False,
@@ -84,18 +110,18 @@ class UnbanUserSerializer(serializers.Serializer):
     )
 
 
-class BannedUserResponseSerializer(serializers.Serializer):
+class BannedUserResponseSerializer(serializers.Serializer):  # type: ignore[type-arg]
     """
     Serializer for banned user data in responses (read-only).
     """
 
     id = serializers.IntegerField(read_only=True)
 
-    def create(self, validated_data):
+    def create(self, validated_data: dict[str, Any]) -> Any:
         """Not implemented - read-only serializer."""
         raise NotImplementedError("Read-only serializer")
 
-    def update(self, instance, validated_data):
+    def update(self, instance: Any, validated_data: dict[str, Any]) -> Any:
         """Not implemented - read-only serializer."""
         raise NotImplementedError("Read-only serializer")
 
@@ -111,7 +137,7 @@ class BannedUserResponseSerializer(serializers.Serializer):
     unbanned_by = serializers.DictField(read_only=True, allow_null=True)
 
 
-class BannedUsersListSerializer(serializers.Serializer):
+class BannedUsersListSerializer(serializers.Serializer):  # type: ignore[type-arg]
     """
     Serializer for listing banned users with filtering options (read-only).
     """
@@ -132,27 +158,27 @@ class BannedUsersListSerializer(serializers.Serializer):
         help_text="Filter by ban scope: 'course' or 'organization'",
     )
 
-    def create(self, validated_data):
+    def create(self, validated_data: dict[str, Any]) -> Any:
         """Not implemented - read-only serializer."""
         raise NotImplementedError("Read-only serializer")
 
-    def update(self, instance, validated_data):
+    def update(self, instance: Any, validated_data: dict[str, Any]) -> Any:
         """Not implemented - read-only serializer."""
         raise NotImplementedError("Read-only serializer")
 
 
-class UnbanResponseSerializer(serializers.Serializer):
+class UnbanResponseSerializer(serializers.Serializer):  # type: ignore[type-arg]
     """
     Serializer for unban operation response (read-only).
     """
 
     status = serializers.CharField(read_only=True)
 
-    def create(self, validated_data):
+    def create(self, validated_data: dict[str, Any]) -> Any:
         """Not implemented - read-only serializer."""
         raise NotImplementedError("Read-only serializer")
 
-    def update(self, instance, validated_data):
+    def update(self, instance: Any, validated_data: dict[str, Any]) -> Any:
         """Not implemented - read-only serializer."""
         raise NotImplementedError("Read-only serializer")
 

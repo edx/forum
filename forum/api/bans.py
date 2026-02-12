@@ -2,14 +2,13 @@
 API functions for managing discussion bans.
 """
 
-# mypy: ignore-errors
-
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional, Union
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AbstractBaseUser
 from django.db import models, transaction
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 from opaque_keys.edx.keys import CourseKey
 
@@ -24,13 +23,13 @@ log = logging.getLogger(__name__)
 
 
 def ban_user(
-    user,
-    banned_by,
-    course_id: Optional[str] = None,
+    user: AbstractBaseUser,
+    banned_by: AbstractBaseUser,
+    course_id: Optional[Union[str, CourseKey]] = None,
     org_key: Optional[str] = None,
     scope: str = "course",
     reason: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Ban a user from discussions.
 
@@ -93,7 +92,7 @@ def ban_user(
             else:
                 course_key = course_id
             # Extract org from course_id for denormalization
-            course_org = str(course_key.org) if hasattr(course_key, "org") else org_key
+            course_org = str(course_key.org) if hasattr(course_key, "org") else org_key  # type: ignore[union-attr]
             lookup_kwargs = {
                 "user": banned_user,
                 "course_id": course_key,
@@ -137,8 +136,8 @@ def ban_user(
                 log.info(
                     "Cleaned up %d orphaned exception(s) for org ban: ban_id=%s, user_id=%s",
                     deleted_count,
-                    ban.id,
-                    banned_user.id,
+                    ban.id,  # type: ignore[attr-defined]
+                    banned_user.id,  # type: ignore[attr-defined]
                 )
 
         # Create audit log
@@ -151,7 +150,7 @@ def ban_user(
             scope=scope,
             reason=reason,
             metadata={
-                "ban_id": ban.id,
+                "ban_id": ban.id,  # type: ignore[attr-defined]
                 "created": created,
             },
             # AI moderation fields (required by schema, not applicable for ban actions)
@@ -167,11 +166,11 @@ def ban_user(
 
         log.info(
             "User banned: user_id=%s, scope=%s, course_id=%s, org_key=%s, banned_by=%s",
-            banned_user.id,
+            banned_user.id,  # type: ignore[attr-defined]
             scope,
             course_id,
             org_key,
-            moderator.id,
+            moderator.id,  # type: ignore[attr-defined]
         )
 
     result = _serialize_ban(ban)
@@ -181,13 +180,13 @@ def ban_user(
 
 
 def unban_user(
-    ban_id: int = None,
-    user=None,
-    unbanned_by=None,
-    course_id: Optional[str] = None,
-    scope: str = None,
+    ban_id: Optional[int] = None,
+    user: Optional[AbstractBaseUser] = None,
+    unbanned_by: Optional[AbstractBaseUser] = None,
+    course_id: Optional[Union[str, CourseKey]] = None,
+    scope: Optional[str] = None,
     reason: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Unban a user from discussions.
 
@@ -234,7 +233,7 @@ def unban_user(
             ban = DiscussionBan.objects.get(**query)
         except DiscussionBan.DoesNotExist as exc:
             raise ValueError(
-                f"No active ban found for user {user.username} with scope {scope}"
+                f"No active ban found for user {user.username} with scope {scope}"  # type: ignore[attr-defined]
             ) from exc
     else:
         raise ValueError("Either ban_id or user must be provided")
@@ -264,10 +263,10 @@ def unban_user(
 
             exception_created = True
             exception_data = {
-                "id": exception.id,
-                "ban_id": ban.id,
+                "id": exception.id,  # type: ignore[attr-defined]
+                "ban_id": ban.id,  # type: ignore[attr-defined]
                 "course_id": str(course_id),
-                "unbanned_by": moderator.username,
+                "unbanned_by": moderator.username if moderator else None,  # type: ignore[attr-defined]
                 "reason": exception.reason,
                 "created_at": (
                     exception.created.isoformat()
@@ -291,8 +290,8 @@ def unban_user(
                 scope="organization",
                 reason=f"Exception to org ban: {reason}",
                 metadata={
-                    "ban_id": ban.id,
-                    "exception_id": exception.id,
+                    "ban_id": ban.id,  # type: ignore[attr-defined]
+                    "exception_id": exception.id,  # type: ignore[attr-defined]
                     "exception_created": created,
                     "org_key": ban.org_key,
                 },
@@ -325,7 +324,7 @@ def unban_user(
                 scope=ban.scope,
                 reason=f"Unban: {reason}",
                 metadata={
-                    "ban_id": ban.id,
+                    "ban_id": ban.id,  # type: ignore[attr-defined]
                 },
                 # AI moderation fields (required by schema, not applicable for ban actions)
                 body="",
@@ -343,7 +342,7 @@ def unban_user(
             ban_id,
             ban.user.id,
             exception_created,
-            moderator.id,
+            moderator.id if moderator else None,  # type: ignore[attr-defined]
         )
 
     return {
@@ -356,11 +355,11 @@ def unban_user(
 
 
 def get_banned_users(
-    course_id: Optional[str] = None,
+    course_id: Optional[Union[str, CourseKey]] = None,
     org_key: Optional[str] = None,
     include_inactive: bool = False,
     scope: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Get list of banned users.
 
@@ -408,8 +407,6 @@ def get_banned_users(
 
     queryset = queryset.order_by("-banned_at")
 
-    bans = list(queryset)
-
     # Filter out org-level bans that have exceptions for the requested course
     # When a user with an org-level ban is "unbanned" at the course level, an exception
     # is created that allows them in that specific course while keeping the org ban active.
@@ -417,26 +414,25 @@ def get_banned_users(
     # those users are effectively not banned in that particular course.
     if course_id:
         # course_key is already defined from the earlier if course_id block
-        filtered_bans = []
-        for ban in bans:
-            # Keep course-level bans as-is
-            if ban.scope == "course":
-                filtered_bans.append(ban)
-            # For org-level bans, only include if there's NO exception for this course
-            elif ban.scope == "organization":
-                has_exception = DiscussionBanException.objects.filter(
-                    ban=ban, course_id=course_key
-                ).exists()
-                if not has_exception:
-                    filtered_bans.append(ban)
-        return [_serialize_ban(ban) for ban in filtered_bans]
+        # Use database-level filtering to avoid N+1 queries
+        exception_subquery = DiscussionBanException.objects.filter(
+            ban=OuterRef("pk"), course_id=course_key
+        )
 
+        queryset = queryset.annotate(has_exception=Exists(exception_subquery)).exclude(
+            scope="organization", has_exception=True
+        )
+
+    bans = list(queryset)
     return [_serialize_ban(ban) for ban in bans]
 
 
 def get_ban(
-    ban_id: int = None, user=None, course_id: Optional[str] = None, scope: str = None
-) -> Optional[Dict[str, Any]]:
+    ban_id: Optional[int] = None,
+    user: Optional[AbstractBaseUser] = None,
+    course_id: Optional[Union[str, CourseKey]] = None,
+    scope: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
     """
     Get a specific ban by ID or by user/course/scope.
 
@@ -478,7 +474,7 @@ def get_ban(
         return None
 
 
-def _serialize_ban(ban: DiscussionBan) -> Dict[str, Any]:
+def _serialize_ban(ban: DiscussionBan) -> dict[str, Any]:
     """
     Serialize a ban object to dictionary.
 
@@ -489,7 +485,7 @@ def _serialize_ban(ban: DiscussionBan) -> Dict[str, Any]:
         dict: Serialized ban data
     """
     return {
-        "id": ban.id,
+        "id": ban.id,  # type: ignore[attr-defined]
         "user": {
             "id": ban.user.id,
             "username": ban.user.username,
@@ -521,7 +517,11 @@ def _serialize_ban(ban: DiscussionBan) -> Dict[str, Any]:
     }
 
 
-def is_user_banned(user, course_id, check_org=True):
+def is_user_banned(
+    user: AbstractBaseUser,
+    course_id: Optional[Union[str, CourseKey]],
+    check_org: bool = True,
+) -> bool:
     """
     Check if user is banned from discussions.
 
@@ -533,10 +533,12 @@ def is_user_banned(user, course_id, check_org=True):
     Returns:
         bool: True if user has active ban
     """
-    return DiscussionBan.is_user_banned(user, course_id, check_org)
+    return DiscussionBan.is_user_banned(user, course_id, check_org)  # type: ignore[no-untyped-call]
 
 
-def get_user_ban_scope(user, course_id):
+def get_user_ban_scope(
+    user: AbstractBaseUser, course_id: Optional[Union[str, CourseKey]]
+) -> Optional[str]:
     """
     Get the scope of a user's active ban ('course' or 'organization').
 
@@ -554,14 +556,24 @@ def get_user_ban_scope(user, course_id):
     # Check organization-level ban first
     try:
         # pylint: disable=import-outside-toplevel
-        from openedx.core.djangoapps.content.course_overviews.models import (
+        from openedx.core.djangoapps.content.course_overviews.models import (  # type: ignore[import-not-found]
             CourseOverview,
         )
 
         course = CourseOverview.objects.get(id=course_id)
         org_name = course.org
-    except (ImportError, Exception):  # pylint: disable=broad-exception-caught
-        org_name = course_id.org
+    except ImportError:
+        # CourseOverview not available (test environment or forum running standalone)
+        org_name = course_id.org  # type: ignore[union-attr]
+    except Exception:  # pylint: disable=broad-exception-caught
+        # Catch all other exceptions (DoesNotExist, AttributeError, cache errors, etc.)
+        # Similar to edx-platform's get_course_overview_or_none pattern
+        # See: openedx/core/djangoapps/content/course_overviews/api.py
+        log.debug(
+            "Could not fetch CourseOverview for %s, falling back to course_id.org",
+            course_id,
+        )
+        org_name = course_id.org  # type: ignore[union-attr]
 
     # Check org-level ban
     org_ban = DiscussionBan.objects.filter(
@@ -599,7 +611,9 @@ def get_user_ban_scope(user, course_id):
     return None
 
 
-def get_banned_usernames(course_id=None, org_key=None):
+def get_banned_usernames(
+    course_id: Optional[Union[str, CourseKey]] = None, org_key: Optional[str] = None
+) -> set[str]:
     """
     Get set of banned usernames for filtering from the learners list.
 
@@ -634,14 +648,14 @@ def get_banned_usernames(course_id=None, org_key=None):
 
 
 def create_audit_log(
-    action_type,
-    target_user,
-    moderator,
-    course_id=None,
-    scope=None,
-    reason="",
-    metadata=None,
-):
+    action_type: str,
+    target_user: AbstractBaseUser,
+    moderator: AbstractBaseUser,
+    course_id: Optional[Union[str, CourseKey]] = None,
+    scope: Optional[str] = None,
+    reason: str = "",
+    metadata: Optional[dict[str, Any]] = None,
+) -> ModerationAuditLog:
     """
     Create a moderation audit log entry.
 

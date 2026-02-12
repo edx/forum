@@ -40,8 +40,8 @@ def test_ban_user_course_level(api_client: APIClient, test_users: dict) -> None:
     course_id = "course-v1:edX+DemoX+Demo_Course"
 
     data = {
-        "user_id": str(learner.id),
-        "banned_by_id": str(moderator.id),
+        "user_id": learner.id,
+        "banned_by_id": moderator.id,
         "scope": "course",
         "course_id": course_id,
         "reason": "Posting spam content",
@@ -68,8 +68,8 @@ def test_ban_user_org_level(api_client: APIClient, test_users: dict) -> None:
     org_key = "edX"
 
     data = {
-        "user_id": str(learner.id),
-        "banned_by_id": str(moderator.id),
+        "user_id": learner.id,
+        "banned_by_id": moderator.id,
         "scope": "organization",
         "org_key": org_key,
         "reason": "Repeated violations across courses",
@@ -90,8 +90,8 @@ def test_ban_user_missing_course_id(api_client: APIClient, test_users: dict) -> 
     moderator = test_users["moderator"]
 
     data = {
-        "user_id": str(learner.id),
-        "banned_by_id": str(moderator.id),
+        "user_id": learner.id,
+        "banned_by_id": moderator.id,
         "scope": "course",
         # Missing course_id
         "reason": "Test reason",
@@ -109,8 +109,8 @@ def test_ban_user_invalid_user_id(api_client: APIClient, test_users: dict) -> No
     course_id = "course-v1:edX+DemoX+Demo_Course"
 
     data = {
-        "user_id": "99999",  # Non-existent user
-        "banned_by_id": str(moderator.id),
+        "user_id": 99999,  # Non-existent user
+        "banned_by_id": moderator.id,
         "scope": "course",
         "course_id": course_id,
         "reason": "Test reason",
@@ -140,8 +140,8 @@ def test_ban_reactivates_previous_ban(api_client: APIClient, test_users: dict) -
     )
 
     data = {
-        "user_id": str(learner.id),
-        "banned_by_id": str(moderator.id),
+        "user_id": learner.id,
+        "banned_by_id": moderator.id,
         "scope": "course",
         "course_id": course_id,
         "reason": "New ban reason",
@@ -174,7 +174,7 @@ def test_unban_course_level_ban(api_client: APIClient, test_users: dict) -> None
         reason="Spam posting",
     )
 
-    data = {"unbanned_by_id": str(moderator.id), "reason": "Appeal approved"}
+    data = {"unbanned_by_id": moderator.id, "reason": "Appeal approved"}
 
     response = api_client.post_json(f"/api/v2/users/bans/{ban.id}/unban", data=data)
 
@@ -205,7 +205,7 @@ def test_unban_org_level_ban_completely(
         reason="Repeated violations",
     )
 
-    data = {"unbanned_by_id": str(moderator.id), "reason": "Ban period expired"}
+    data = {"unbanned_by_id": moderator.id, "reason": "Ban period expired"}
 
     response = api_client.post_json(f"/api/v2/users/bans/{ban.id}/unban", data=data)
 
@@ -237,7 +237,7 @@ def test_unban_org_ban_with_course_exception(
     )
 
     data = {
-        "unbanned_by_id": str(moderator.id),
+        "unbanned_by_id": moderator.id,
         "course_id": course_id,
         "reason": "Approved for this course",
     }
@@ -261,7 +261,7 @@ def test_unban_invalid_ban_id(api_client: APIClient, test_users: dict) -> None:
     """Test unbanning fails with invalid ban ID."""
     moderator = test_users["moderator"]
 
-    data = {"unbanned_by_id": str(moderator.id), "reason": "Test"}
+    data = {"unbanned_by_id": moderator.id, "reason": "Test"}
 
     response = api_client.post_json("/api/v2/users/bans/99999/unban", data=data)
 

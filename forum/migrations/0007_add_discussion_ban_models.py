@@ -2,6 +2,8 @@
 
 # mypy: ignore-errors
 
+from typing import Any
+
 from django.conf import settings
 from django.db import migrations, models
 import django.db.models.deletion
@@ -10,7 +12,9 @@ import model_utils.fields
 import opaque_keys.edx.django.models
 
 
-def populate_source_with_ai(apps, schema_editor):  # pylint: disable=unused-argument
+def populate_source_with_ai(
+    apps: Any, schema_editor: Any
+) -> None:  # pylint: disable=unused-argument
     """
     Populate existing ModerationAuditLog records with source='ai'.
 
@@ -30,7 +34,9 @@ def populate_source_with_ai(apps, schema_editor):  # pylint: disable=unused-argu
         pass
 
 
-def reverse_populate_source(apps, schema_editor):  # pylint: disable=unused-argument
+def reverse_populate_source(
+    apps: Any, schema_editor: Any
+) -> None:  # pylint: disable=unused-argument
     """
     Reverse migration: Set source back to 'human' for records that were updated.
 
