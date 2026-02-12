@@ -42,22 +42,6 @@ class BanUserSerializer(serializers.Serializer):  # type: ignore[type-arg]
         """Not implemented - bans are created, not updated."""
         raise NotImplementedError("Bans cannot be updated")
 
-    def validate_user_id(self, value: int) -> int:
-        """Validate that the user exists."""
-        try:
-            User.objects.get(id=value)
-        except User.DoesNotExist as exc:
-            raise serializers.ValidationError("User not found") from exc
-        return value
-
-    def validate_banned_by_id(self, value: int) -> int:
-        """Validate that the moderator exists."""
-        try:
-            User.objects.get(id=value)
-        except User.DoesNotExist as exc:
-            raise serializers.ValidationError("Moderator user not found") from exc
-        return value
-
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         """Validate that required fields are present based on scope."""
         scope = attrs.get("scope", "course")
