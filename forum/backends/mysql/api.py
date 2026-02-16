@@ -397,6 +397,7 @@ class MySQLBackend(AbstractBackend):
     def get_abuse_flagged_count(thread_ids: list[str]) -> dict[str, int]:
         """
         Retrieves the count of abuse-flagged comments for each thread in the provided list of thread IDs.
+        Only counts non-deleted comments.
 
         Args:
             thread_ids (list[str]): List of thread IDs to check for abuse flags.
@@ -417,6 +418,7 @@ class MySQLBackend(AbstractBackend):
         abuse_flagged_comments = (
             Comment.objects.filter(
                 comment_thread__pk__in=thread_ids,
+                is_deleted=False,
             )
             .annotate(
                 abuse_flaggers_count=Subquery(

@@ -411,6 +411,7 @@ class MongoBackend(AbstractBackend):
     def get_abuse_flagged_count(thread_ids: list[str]) -> dict[str, int]:
         """
         Retrieves the count of abuse-flagged comments for each thread in the provided list of thread IDs.
+        Only counts non-deleted comments.
 
         Args:
             thread_ids (list[str]): List of thread IDs to check for abuse flags.
@@ -423,6 +424,7 @@ class MongoBackend(AbstractBackend):
                 "$match": {
                     "comment_thread_id": {"$in": [ObjectId(tid) for tid in thread_ids]},
                     "abuse_flaggers": {"$ne": []},
+                    "is_deleted": {"$ne": True},
                 }
             },
             {"$group": {"_id": "$comment_thread_id", "flagged_count": {"$sum": 1}}},
