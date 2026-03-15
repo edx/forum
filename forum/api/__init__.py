@@ -2,6 +2,16 @@
 Native Python APIs.
 """
 
+from .bans import (
+    ban_user,
+    create_audit_log,
+    get_ban,
+    get_banned_users,
+    get_banned_usernames,
+    get_user_ban_scope,
+    is_user_banned,
+    unban_user,
+)
 from .commentables import get_commentables_stats
 from .comments import (
     create_child_comment,
@@ -37,11 +47,17 @@ from .threads import (
 )
 from .users import (
     create_user,
+    get_all_muted_users_for_course,
+    get_muted_users,
     get_user,
     get_user_active_threads,
     get_user_course_stats,
+    get_user_mute_status,
     mark_thread_as_read,
+    mute_and_report_user,
+    mute_user,
     retire_user,
+    unmute_user,
     update_user,
     update_username,
     update_users_in_course,
@@ -54,6 +70,8 @@ from .votes import (
 )
 
 __all__ = [
+    "ban_user",
+    "create_audit_log",
     "create_child_comment",
     "create_parent_comment",
     "create_subscription",
@@ -64,6 +82,9 @@ __all__ = [
     "delete_subscription",
     "delete_thread",
     "delete_thread_vote",
+    "get_ban",
+    "get_banned_users",
+    "get_banned_usernames",
     "get_commentables_stats",
     "get_course_id_by_comment",
     "get_course_id_by_thread",
@@ -72,16 +93,19 @@ __all__ = [
     "get_thread_subscriptions",
     "get_user",
     "get_user_active_threads",
+    "get_user_ban_scope",
     "get_user_comments",
     "get_user_course_stats",
     "get_user_subscriptions",
     "get_user_threads",
+    "is_user_banned",
     "get_deleted_comments_for_course",
     "get_deleted_threads_for_course",
     "mark_thread_as_read",
     "pin_thread",
     "retire_user",
     "search_threads",
+    "unban_user",
     "unpin_thread",
     "update_comment",
     "update_comment_flag",
@@ -92,4 +116,10 @@ __all__ = [
     "update_user",
     "update_username",
     "update_users_in_course",
+    "mute_user",
+    "unmute_user",
+    "get_user_mute_status",
+    "get_muted_users",
+    "get_all_muted_users_for_course",
+    "mute_and_report_user",
 ]
