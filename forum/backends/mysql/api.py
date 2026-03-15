@@ -34,7 +34,6 @@ from forum.backends.mysql.models import (
     CommentThread,
     CourseStat,
     DiscussionMuteRecord,
-    DiscussionMuteException,
     EditHistory,
     ForumUser,
     HistoricalAbuseFlagger,
@@ -2770,13 +2769,8 @@ class MySQLBackend(AbstractBackend):
             is_active=True,
         )
 
-        # Check for exceptions
-        has_exception = DiscussionMuteException.objects.filter(
-            muted_user=user, exception_user=viewer, course_id=course_id
-        ).exists()
-
         is_personally_muted = personal_mutes.exists()
-        is_course_muted = course_mutes.exists() and not has_exception
+        is_course_muted = course_mutes.exists()
 
         return {
             "user_id": muted_user_id,
@@ -2784,7 +2778,6 @@ class MySQLBackend(AbstractBackend):
             "is_muted": is_personally_muted or is_course_muted,
             "personal_mute": is_personally_muted,
             "course_mute": is_course_muted,
-            "has_exception": has_exception,
             "mute_details": [mute.to_dict() for mute in personal_mutes]
             + [mute.to_dict() for mute in course_mutes],
         }
@@ -2851,46 +2844,6 @@ class MySQLBackend(AbstractBackend):
             "muted_users": muted_users,
             "total_count": len(muted_users),
         }
-
-    @classmethod
-    @_handle_mute_errors
-    def create_mute_exception(
-        cls, muted_user_id: str, exception_user_id: str, course_id: str, **kwargs: Any
-    ) -> dict[str, Any]:
-        """Create a mute exception for course-wide mutes."""
-        muted_user = User.objects.get(pk=int(muted_user_id))
-        exception_user = User.objects.get(pk=int(exception_user_id))
-
-        if not cls.user_has_privileges(exception_user):
-            raise ValidationError("Only privileged users can create mute exceptions")
-
-        # Check active course mute exists
-        active_course_mute = DiscussionMuteRecord.objects.filter(
-            muted_user=muted_user,
-            course_id=course_id,
-            scope=DiscussionMuteRecord.Scope.COURSE,
-            is_active=True,
-        ).first()
-        if not active_course_mute:
-            raise ValidationError("No active course-wide mute found for the user")
-
-        # Prevent duplicates
-        if DiscussionMuteException.objects.filter(
-            muted_user=muted_user,
-            exception_user=exception_user,
-            course_id=course_id,
-        ).exists():
-            raise ValidationError("Mute exception already exists")
-
-        # Create exception
-        mute_exception = DiscussionMuteException(
-            muted_user=muted_user,
-            exception_user=exception_user,
-            course_id=course_id,
-        )
-        mute_exception.full_clean()
-        mute_exception.save()
-        return mute_exception.to_dict()
 
     @classmethod
     @_handle_mute_errors

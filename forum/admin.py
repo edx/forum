@@ -16,7 +16,6 @@ from forum.models import (
     MongoContent,
     ModerationAuditLog,
     DiscussionMuteRecord,
-    DiscussionMuteException,
 )
 
 
@@ -172,15 +171,6 @@ class DiscussionMuteAdmin(admin.ModelAdmin):  # type: ignore
         "course_id",
     )
     list_filter = ("scope", "is_active", "created", "modified")
-
-
-@admin.register(DiscussionMuteException)
-class DiscussionMuteExceptionAdmin(admin.ModelAdmin):  # type: ignore
-    """Admin interface for DiscussionMuteException model."""
-
-    list_display = ("muted_user", "exception_user", "course_id", "created")
-    search_fields = ("muted_user__username", "exception_user__username", "course_id")
-    list_filter = ("created",)
 
 
 @admin.register(MongoContent)

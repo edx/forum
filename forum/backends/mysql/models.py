@@ -1017,26 +1017,6 @@ class ModerationAuditLog(models.Model):
         )
     )
 
-    course_id: models.CharField[str, str] = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="Course where the moderation action was performed",
-    )
-    scope: models.CharField[str, str] = models.CharField(
-        max_length=10,
-        blank=True,
-        help_text="Scope of mute action (personal or course)",
-    )
-    reason: models.TextField[str, str] = models.TextField(
-        blank=True,
-        help_text="Optional reason for mute/unmute action",
-    )
-    metadata = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Additional metadata for mute moderation",
-    )
-
     def to_dict(self) -> dict[str, Any]:
         """Return a dictionary representation of the model."""
         data: dict[str, Any] = {
@@ -1175,6 +1155,8 @@ class DiscussionBan(TimeStampedModel):
         blank=True,
         related_name="bans_reversed",
     )
+    class Meta:
+        app_label = "forum"
         db_table = "discussion_user_ban"
         indexes = [
             models.Index(fields=["user", "is_active"], name="idx_user_active"),
@@ -1477,73 +1459,3 @@ class DiscussionMuteRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.muted_by} muted {self.muted_user} in {self.course_id} ({self.scope})"
-
-
-class DiscussionMuteException(models.Model):
-    """
-    Per-user exception for course-wide mutes.
-    Allows a specific user to unmute someone while the rest of the course remains muted.
-    """
-
-    muted_user: models.ForeignKey[User, User] = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name="forum_mute_exceptions_for",
-        help_text="User who is globally muted in this course",
-        db_index=True,
-    )
-    exception_user: models.ForeignKey[User, User] = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name="forum_mute_exceptions",
-        help_text="User who unmuted the muted_user for themselves",
-        db_index=True,
-    )
-    course_id: models.CharField[str, str] = models.CharField(
-        max_length=255,
-        help_text="Course where the exception applies",
-        db_index=True,
-    )
-    created: models.DateTimeField[datetime, datetime] = models.DateTimeField(
-        auto_now_add=True
-    )
-    modified: models.DateTimeField[datetime, datetime] = models.DateTimeField(
-        auto_now=True
-    )
-
-    class Meta:
-        app_label = "forum"
-        db_table = "forum_discussion_mute_exception"
-        unique_together = [["muted_user", "exception_user", "course_id"]]
-        indexes = [
-            models.Index(fields=["muted_user", "course_id"]),
-            models.Index(fields=["exception_user", "course_id"]),
-        ]
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return a dictionary representation of the model."""
-        return {
-            "_id": str(self.pk),
-            "muted_user_id": str(self.muted_user.pk),
-            "muted_user_username": self.muted_user.username,
-            "exception_user_id": str(self.exception_user.pk),
-            "exception_user_username": self.exception_user.username,
-            "course_id": self.course_id,
-            "created": self.created.isoformat() if self.created else None,
-            "modified": self.modified.isoformat() if self.modified else None,
-        }
-
-    def clean(self) -> None:
-        """Ensure exception is only created if a course-wide mute is active."""
-
-        has_coursewide_mute = DiscussionMuteRecord.objects.filter(
-            muted_user=self.muted_user,
-            course_id=self.course_id,
-            scope=DiscussionMuteRecord.Scope.COURSE,
-            is_active=True,
-        ).exists()
-
-        if not has_coursewide_mute:
-            raise ValidationError(
-                "Exception can only be created for an active course-wide mute."
-            )
