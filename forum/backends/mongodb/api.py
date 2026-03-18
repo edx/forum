@@ -8,6 +8,8 @@ from typing import Any, Optional
 from bson import ObjectId
 from bson import errors as bson_errors
 from django.core.exceptions import ObjectDoesNotExist
+from edx_django_utils import monitoring
+from edx_django_utils.monitoring import set_custom_attribute
 
 from forum.backends.backend import AbstractBackend
 from forum.backends.mongodb.comments import Comment
@@ -1167,10 +1169,18 @@ class MongoBackend(AbstractBackend):
         content_model = Contents()
         contents = content_model.get_list()
         voted_ids = []
+        total_iterations = 0
         for content in contents:
+            total_iterations += 1
+            monitoring.increment('forum.get_user_voted_ids.loop_iteration')
             votes = content["votes"][vote]
             if user_id in votes:
                 voted_ids.append(content["_id"])
+        
+        # Track total iterations and results as custom attributes for detailed analysis
+        set_custom_attribute('forum.get_user_voted_ids.total_contents', total_iterations)
+        set_custom_attribute('forum.get_user_voted_ids.voted_count', len(voted_ids))
+        set_custom_attribute('forum.get_user_voted_ids.vote_type', vote)
 
         return voted_ids
 
