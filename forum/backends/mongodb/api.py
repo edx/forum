@@ -1170,14 +1170,12 @@ class MongoBackend(AbstractBackend):
         content_query: dict[str, Any] = {}
         if course_id:
             content_query["course_id"] = str(course_id)
-        content_query[f"votes.{vote}"] = {"$in": [user_id, str(user_id)]}
+        content_query[f"votes.{vote}"] = user_id
 
         contents = content_model.get_list(**content_query)
         voted_ids = []
         for content in contents:
-            votes = content["votes"][vote]
-            if user_id in votes:
-                voted_ids.append(content["_id"])
+            voted_ids.append(content["_id"])
 
         return voted_ids
 
