@@ -44,3 +44,19 @@ def plugin_settings(settings: Any) -> None:
 
     # Timezone-awareness is required for mysql fields
     settings.USE_TZ = getattr(settings, "USE_TZ", True)
+
+    # AI Moderation settings
+    settings.AI_MODERATION_API_URL = getattr(settings, "AI_MODERATION_API_URL", None)
+    settings.AI_MODERATION_CLIENT_ID = getattr(
+        settings, "AI_MODERATION_CLIENT_ID", None
+    )
+    settings.AI_MODERATION_SYSTEM_MESSAGE = getattr(
+        settings, "AI_MODERATION_SYSTEM_MESSAGE", None
+    )
+    settings.AI_MODERATION_CONNECTION_TIMEOUT = getattr(
+        settings, "AI_MODERATION_CONNECTION_TIMEOUT", 30
+    )
+    settings.AI_MODERATION_READ_TIMEOUT = getattr(
+        settings, "AI_MODERATION_READ_TIMEOUT", 30
+    )
+    settings.AI_MODERATION_USER_ID = getattr(settings, "AI_MODERATION_USER_ID", None)

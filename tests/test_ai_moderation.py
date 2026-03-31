@@ -7,7 +7,7 @@ from unittest.mock import Mock, MagicMock, patch
 import pytest
 from django.contrib.auth import get_user_model
 
-from forum.ai_moderation import AIModerationService, moderate_and_flag_spam
+from forum.ai_moderation import moderate_and_flag_spam
 from forum.backends.mysql.models import ModerationAuditLog
 from forum.utils import ForumV2RequestError
 
@@ -66,14 +66,6 @@ def mock_waffle_flags() -> Any:
 
 
 @pytest.fixture
-def ai_service(
-    mock_ai_moderation_settings: Any,  # pylint: disable=redefined-outer-name,unused-argument
-) -> AIModerationService:
-    """Create an AI moderation service instance."""
-    return AIModerationService()  # type: ignore[no-untyped-call]
-
-
-@pytest.fixture
 def sample_thread_content() -> dict[str, Any]:
     """Create sample thread content for testing."""
     return {
@@ -106,7 +98,7 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
 
     def test_auto_delete_triggered_when_enabled(
         self,
-        ai_service: AIModerationService,
+        mock_ai_moderation_settings: Any,
         mock_waffle_flags: dict[str, Mock],
         sample_thread_content: dict[str, Any],
     ) -> None:
@@ -122,11 +114,11 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
 
         backend = Mock()
 
-        with patch("requests.post", return_value=mock_response), patch.object(
-            ai_service, "_delete_content"
-        ) as mock_delete:
+        with patch("requests.post", return_value=mock_response), patch(
+            "forum.ai_moderation.delete_thread"
+        ) as mock_delete_thread:
 
-            result = ai_service.moderate_and_flag_content(
+            result = moderate_and_flag_spam(
                 "spam content",
                 sample_thread_content,
                 course_id="course-v1:edX+DemoX+Demo",
@@ -134,7 +126,7 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
             )
 
             # Verify auto-delete was called
-            mock_delete.assert_called_once_with(sample_thread_content)
+            mock_delete_thread.assert_called_once()
 
             # Verify actions_taken includes both flagged and soft_deleted
             assert "flagged" in result["actions_taken"]
@@ -143,7 +135,7 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
 
     def test_auto_delete_not_triggered_when_disabled(
         self,
-        ai_service: AIModerationService,
+        mock_ai_moderation_settings: Any,
         mock_waffle_flags: dict[str, Mock],
         sample_thread_content: dict[str, Any],
     ) -> None:
@@ -162,11 +154,11 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
 
         backend = Mock()
 
-        with patch("requests.post", return_value=mock_response), patch.object(
-            ai_service, "_delete_content"
-        ) as mock_delete:
+        with patch("requests.post", return_value=mock_response), patch(
+            "forum.ai_moderation.delete_thread"
+        ) as mock_delete_thread:
 
-            result = ai_service.moderate_and_flag_content(
+            result = moderate_and_flag_spam(
                 "spam content",
                 sample_thread_content,
                 course_id="course-v1:edX+DemoX+Demo",
@@ -174,7 +166,7 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
             )
 
             # Verify auto-delete was NOT called
-            mock_delete.assert_not_called()
+            mock_delete_thread.assert_not_called()
 
             # Verify actions_taken includes only flagged
             assert "flagged" in result["actions_taken"]
@@ -183,7 +175,7 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
 
     def test_auto_delete_not_triggered_for_non_spam(
         self,
-        ai_service: AIModerationService,
+        mock_ai_moderation_settings: Any,
         mock_waffle_flags: dict[str, Mock],
         sample_thread_content: dict[str, Any],
     ) -> None:
@@ -201,11 +193,11 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
 
         backend = Mock()
 
-        with patch("requests.post", return_value=mock_response), patch.object(
-            ai_service, "_delete_content"
-        ) as mock_delete:
+        with patch("requests.post", return_value=mock_response), patch(
+            "forum.ai_moderation.delete_thread"
+        ) as mock_delete_thread:
 
-            result = ai_service.moderate_and_flag_content(
+            result = moderate_and_flag_spam(
                 "legitimate content",
                 sample_thread_content,
                 course_id="course-v1:edX+DemoX+Demo",
@@ -213,7 +205,7 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
             )
 
             # Verify auto-delete was NOT called
-            mock_delete.assert_not_called()
+            mock_delete_thread.assert_not_called()
 
             # Verify no actions taken
             assert result["actions_taken"] == ["no_action"]
@@ -221,7 +213,7 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
 
     def test_actions_taken_reflects_flagged_only_when_delete_disabled(
         self,
-        ai_service: AIModerationService,
+        mock_ai_moderation_settings: Any,
         mock_waffle_flags: dict[str, Mock],
         sample_comment_content: dict[str, Any],
     ) -> None:
@@ -240,7 +232,7 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
         backend = Mock()
 
         with patch("requests.post", return_value=mock_response):
-            result = ai_service.moderate_and_flag_content(
+            result = moderate_and_flag_spam(
                 "spam content",
                 sample_comment_content,
                 course_id="course-v1:edX+DemoX+Demo",
@@ -252,7 +244,7 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
 
     def test_actions_taken_reflects_both_when_delete_enabled(
         self,
-        ai_service: AIModerationService,
+        mock_ai_moderation_settings: Any,
         mock_waffle_flags: dict[str, Mock],
         sample_comment_content: dict[str, Any],
     ) -> None:
@@ -267,11 +259,11 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
 
         backend = Mock()
 
-        with patch("requests.post", return_value=mock_response), patch.object(
-            ai_service, "_delete_content"
+        with patch("requests.post", return_value=mock_response), patch(
+            "forum.ai_moderation.delete_comment"
         ):
 
-            result = ai_service.moderate_and_flag_content(
+            result = moderate_and_flag_spam(
                 "spam content",
                 sample_comment_content,
                 course_id="course-v1:edX+DemoX+Demo",
@@ -288,7 +280,7 @@ class TestAIModerationErrorHandling:  # pylint: disable=redefined-outer-name,unu
 
     def test_deletion_failure_after_successful_flagging(
         self,
-        ai_service: AIModerationService,
+        mock_ai_moderation_settings: Any,
         mock_waffle_flags: dict[str, Mock],
         sample_thread_content: dict[str, Any],
     ) -> None:
@@ -303,13 +295,12 @@ class TestAIModerationErrorHandling:  # pylint: disable=redefined-outer-name,unu
 
         backend = Mock()
 
-        with patch("requests.post", return_value=mock_response), patch.object(
-            ai_service,
-            "_delete_content",
+        with patch("requests.post", return_value=mock_response), patch(
+            "forum.ai_moderation.delete_thread",
             side_effect=ForumV2RequestError("Delete failed"),
         ):
 
-            result = ai_service.moderate_and_flag_content(
+            result = moderate_and_flag_spam(
                 "spam content",
                 sample_thread_content,
                 course_id="course-v1:edX+DemoX+Demo",
@@ -324,7 +315,7 @@ class TestAIModerationErrorHandling:  # pylint: disable=redefined-outer-name,unu
 
     def test_flagging_failure_prevents_deletion(
         self,
-        ai_service: AIModerationService,
+        mock_ai_moderation_settings: Any,
         mock_waffle_flags: dict[str, Mock],
         sample_thread_content: dict[str, Any],
     ) -> None:
@@ -340,11 +331,11 @@ class TestAIModerationErrorHandling:  # pylint: disable=redefined-outer-name,unu
         backend = Mock()
         backend.flag_content_as_spam.side_effect = ValueError("Flag failed")
 
-        with patch("requests.post", return_value=mock_response), patch.object(
-            ai_service, "_delete_content"
-        ) as mock_delete:
+        with patch("requests.post", return_value=mock_response), patch(
+            "forum.ai_moderation.delete_thread"
+        ) as mock_delete_thread:
 
-            result = ai_service.moderate_and_flag_content(
+            result = moderate_and_flag_spam(
                 "spam content",
                 sample_thread_content,
                 course_id="course-v1:edX+DemoX+Demo",
@@ -352,55 +343,8 @@ class TestAIModerationErrorHandling:  # pylint: disable=redefined-outer-name,unu
             )
 
             # Delete should not be called if flagging fails
-            mock_delete.assert_not_called()
+            mock_delete_thread.assert_not_called()
             assert result["actions_taken"] == ["no_action"]
-
-
-class TestDeleteContentMethod:  # pylint: disable=redefined-outer-name,protected-access
-    """Tests for the _delete_content method."""
-
-    def test_delete_thread_calls_api_correctly(
-        self,
-        ai_service: AIModerationService,
-        sample_thread_content: dict[str, Any],
-    ) -> None:
-        """Test that deleting a thread calls the API layer correctly."""
-        with patch("forum.api.threads.delete_thread") as mock_delete_thread:
-            ai_service._delete_content(sample_thread_content)
-
-            mock_delete_thread.assert_called_once_with(
-                "thread123",
-                course_id="course-v1:edX+DemoX+Demo",
-                deleted_by="999",
-            )
-
-    def test_delete_comment_calls_api_correctly(
-        self,
-        ai_service: AIModerationService,
-        sample_comment_content: dict[str, Any],
-    ) -> None:
-        """Test that deleting a comment calls the API layer correctly."""
-        with patch("forum.api.comments.delete_comment") as mock_delete_comment:
-            ai_service._delete_content(sample_comment_content)
-
-            mock_delete_comment.assert_called_once_with(
-                "comment456",
-                course_id="course-v1:edX+DemoX+Demo",
-                deleted_by="999",
-            )
-
-    def test_delete_handles_api_errors(
-        self,
-        ai_service: AIModerationService,
-        sample_thread_content: dict[str, Any],
-    ) -> None:
-        """Test that deletion errors propagate to caller."""
-        with patch("forum.api.threads.delete_thread") as mock_delete_thread:
-            mock_delete_thread.side_effect = ForumV2RequestError("API Error")
-
-            # Should raise exception to caller
-            with pytest.raises(ForumV2RequestError):
-                ai_service._delete_content(sample_thread_content)
 
 
 class TestModerateAndFlagSpamFunction:  # pylint: disable=redefined-outer-name
@@ -422,12 +366,10 @@ class TestModerateAndFlagSpamFunction:  # pylint: disable=redefined-outer-name
         ]
 
         backend = Mock()
-        # Create instance with mocked settings already active
-        test_service: AIModerationService = AIModerationService()  # type: ignore[no-untyped-call]
 
         with patch("requests.post", return_value=mock_response), patch(
             "forum.api.threads.delete_thread"
-        ), patch("forum.ai_moderation.ai_moderation_service", test_service):
+        ):
 
             result = moderate_and_flag_spam(
                 "spam content",
@@ -446,7 +388,6 @@ class TestAuditLogging:  # pylint: disable=redefined-outer-name,unused-argument
 
     def test_audit_log_created_for_auto_deleted_content(
         self,
-        ai_service: AIModerationService,
         mock_ai_moderation_settings: Any,
         mock_waffle_flags: dict[str, Mock],
         sample_thread_content: dict[str, Any],
@@ -468,7 +409,7 @@ class TestAuditLogging:  # pylint: disable=redefined-outer-name,unused-argument
             "forum.api.threads.delete_thread"
         ):
 
-            ai_service.moderate_and_flag_content(
+            moderate_and_flag_spam(
                 "spam content",
                 sample_thread_content,
                 course_id="course-v1:edX+DemoX+Demo",

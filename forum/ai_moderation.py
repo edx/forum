@@ -97,244 +97,6 @@ def create_moderation_audit_log(
         log.error(f"Failed to create database audit log: {db_error}")
 
 
-class AIModerationService:
-    """
-    Service for AI-based content moderation.
-
-    Waffle Flag "discussion.enable_ai_moderation" controls whether AI moderation is active.
-
-    XPERT AI Moderation API is used to classify content as spam or not spam.
-    """
-
-    def __init__(self):  # type: ignore[no-untyped-def]
-        """Initialize the AI moderation service."""
-        self.api_url = getattr(settings, "AI_MODERATION_API_URL", None)
-        self.client_id = getattr(settings, "AI_MODERATION_CLIENT_ID", None)
-        self.system_message = getattr(settings, "AI_MODERATION_SYSTEM_MESSAGE", None)
-        self.connection_timeout = getattr(
-            settings, "AI_MODERATION_CONNECTION_TIMEOUT", 30
-        )  # seconds
-        self.read_timeout = getattr(
-            settings, "AI_MODERATION_READ_TIMEOUT", 30
-        )  # seconds
-        self.ai_moderation_user_id = getattr(settings, "AI_MODERATION_USER_ID", None)
-
-    def _make_api_request(self, content: str) -> Optional[Dict[str, Any]]:
-        """
-        Make API request to XPert Service.
-
-        Args:
-            content: The text content to moderate
-
-        Returns:
-            Dictionary with 'reasoning' and 'classification' keys, or None if failed
-        """
-        if not self.api_url:
-            log.error("AI_MODERATION_API_URL setting is not configured")
-            return None
-
-        headers = {
-            "accept": "*/*",
-            "accept-language": "en-US,en;q=0.9",
-            "content-type": "application/json",
-            "user-agent": "Mozilla/5.0 (compatible; edX-Forum-AI-Moderation/1.0)",
-        }
-
-        payload = {
-            "messages": [{"role": "user", "content": content}],
-            "client_id": self.client_id,
-            "system_message": self.system_message,
-        }
-
-        try:
-            response = requests.post(
-                self.api_url,
-                headers=headers,
-                json=payload,
-                timeout=(self.connection_timeout, self.read_timeout),
-            )
-            response.raise_for_status()
-
-            response_data = response.json()
-            # Validate response data structure
-            if not isinstance(response_data, list):
-                log.error(
-                    f"Expected list response from XPert API, got {type(response_data)}"
-                )
-                return None
-
-            if len(response_data) == 0:
-                log.error("Empty response list from XPert API")
-                return None
-
-            if not isinstance(response_data[0], dict):
-                log.error(
-                    f"Expected dict in response list, got {type(response_data[0])}"
-                )
-                return None
-
-            assistant_content = response_data[0].get("content", "")
-            # Parse the JSON content from the assistant response
-            try:
-                moderation_result = json.loads(assistant_content)
-                # full API response for audit purposes
-                moderation_result["full_api_response"] = response_data
-                return moderation_result
-            except json.JSONDecodeError as e:
-                log.error(f"Failed to parse AI moderation response JSON: {e}")
-                return None
-        except (
-            requests.RequestException,
-            requests.Timeout,
-            requests.ConnectionError,
-        ) as e:
-            log.error(f"AI moderation API request failed: {e}")
-            return None
-
-    def moderate_and_flag_content(
-        self,
-        content: str,
-        content_instance: Any,
-        course_id: Optional[str] = None,
-        backend: Optional[Any] = None,
-    ) -> Dict[str, Any]:
-        """
-        Moderate content and flag as spam and flag abuse if detected.
-
-        Args:
-            content: The text content to check
-            content_instance: The content model instance (Thread or Comment)
-            course_id: Optional course ID for waffle flag checking
-            backend: Backend instance for database operations
-
-        Returns:
-            Dictionary with moderation results and actions taken
-        """
-        result = {
-            "is_spam": False,
-            "reasoning": "AI moderation disabled or unavailable",
-            "classification": "not_spam",
-            "actions_taken": ["no_action"],
-            "flagged": False,
-        }
-        # Check if AI moderation is enabled
-        # pylint: disable=import-outside-toplevel
-        from forum.toggles import (
-            is_ai_moderation_enabled,
-            is_ai_auto_delete_spam_enabled,
-        )
-
-        course_key = CourseKey.from_string(course_id) if course_id else None
-        if not is_ai_moderation_enabled(course_key):  # type: ignore[no-untyped-call]
-            return result
-
-        # Make API request
-        moderation_result = self._make_api_request(content)
-
-        if moderation_result is None:
-            result["reasoning"] = "AI moderation API failed"
-            log.warning("AI moderation API failed")
-            return result
-
-        classification = moderation_result.get("classification", "not_spam")
-        reasoning = moderation_result.get("reasoning", "No reasoning provided")
-        is_spam = classification in ["spam", "spam_or_scam"]
-
-        result.update(
-            {
-                "is_spam": is_spam,
-                "reasoning": reasoning,
-                "classification": classification,
-                "moderation_result": moderation_result,
-            }
-        )
-
-        if is_spam:
-            # Flag content as spam and abuse first
-            try:
-                content_instance["is_spam"] = True
-
-                self._mark_as_spam_and_moderate(content_instance, backend)
-                result["actions_taken"] = ["flagged"]
-                result["flagged"] = True
-            except (AttributeError, ValueError, TypeError) as e:
-                log.error(f"Failed to flag content as spam: {e}")
-                result["actions_taken"] = ["no_action"]
-
-            # Only attempt deletion if flagging succeeded
-            if is_ai_auto_delete_spam_enabled(course_key) and result["flagged"]:  # type: ignore[no-untyped-call]
-                try:
-                    self._delete_content(content_instance)
-                    result["actions_taken"] = result["actions_taken"] + ["soft_deleted"]  # type: ignore[operator]
-                except (ForumV2RequestError, ObjectDoesNotExist, ValidationError) as e:
-                    log.error(f"Failed to delete content after flagging: {e}")
-        else:
-            result["actions_taken"] = ["no_action"]
-
-        # Only create audit log for spam content (or API failures, handled above)
-        if is_spam:
-            create_moderation_audit_log(
-                content_instance,
-                moderation_result,
-                result["actions_taken"],  # type: ignore[arg-type]
-                _get_author_from_content(content_instance),
-            )
-        return result
-
-    def _mark_as_spam_and_moderate(self, content_instance: Any, backend: Any) -> None:
-        """Flag content as abuse using backend methods."""
-        content_id = str(content_instance.get("_id"))
-        content_type = str(content_instance.get("_type"))
-        extra_data = {
-            "entity_type": (
-                "CommentThread" if content_type == "CommentThread" else "Comment"
-            )
-        }
-        if not self.ai_moderation_user_id:
-            raise ValueError("AI_MODERATION_USER_ID setting is not configured.")
-        backend.flag_content_as_spam(content_type, content_id)
-        backend.flag_as_abuse(str(self.ai_moderation_user_id), content_id, **extra_data)
-
-    def _delete_content(self, content_instance: Any) -> None:
-        """
-        Soft delete content using API layer delete functions.
-
-        Uses the API layer which handles all business logic including:
-        - Content validation
-        - Soft deletion
-        - Stats updates
-        - Subscription cleanup (for threads)
-        - Anonymous content handling
-
-        Args:
-            content_instance: Dict containing content data including _id, _type, and course_id
-        """
-        # Import here to avoid circular dependency (api modules import from ai_moderation)
-        # pylint: disable=import-outside-toplevel,cyclic-import
-        from forum.api.comments import delete_comment
-        from forum.api.threads import delete_thread
-
-        content_id = str(content_instance.get("_id"))
-        content_type = str(content_instance.get("_type"))
-        course_id = content_instance.get("course_id")
-        deleted_by = (
-            str(self.ai_moderation_user_id) if self.ai_moderation_user_id else None
-        )
-
-        # Use API layer functions which handle all business logic
-        # Exceptions propagate to caller for proper error handling
-        if content_type == "CommentThread":
-            delete_thread(content_id, course_id=course_id, deleted_by=deleted_by)
-            log.info(f"AI Moderation Deleted CommentThread: {content_id}")
-        elif content_type == "Comment":
-            delete_comment(content_id, course_id=course_id, deleted_by=deleted_by)
-            log.info(f"AI Moderation Deleted Comment: {content_id}")
-
-
-# Global instance
-ai_moderation_service = AIModerationService()  # type: ignore[no-untyped-call]
-
-
 def moderate_and_flag_spam(
     content: str,
     content_instance: Any,
@@ -344,18 +106,210 @@ def moderate_and_flag_spam(
     """
     Moderate content and flag as spam if detected.
 
+    This function checks content using AI moderation service and takes appropriate actions
+    based on the settings. Settings and API calls are only accessed after checking if
+    AI moderation is enabled via waffle flags.
+
+    Main workflow:
+    1. Check if AI moderation is enabled (waffle flag)
+    2. Make API request to AI moderation service
+    3. If spam detected:
+       a. Flag content as spam and abuse
+       b. Optionally soft-delete if auto-delete is enabled
+       c. Create audit log
+
     Args:
         content: The text content to moderate
-        content_instance: The content model instance
+        content_instance: The content model instance (Thread or Comment)
         course_id: Optional course ID for waffle flag checking
         backend: Backend instance for database operations
 
     Returns:
         Dictionary with moderation results and actions taken
 
-    TODO:-
+    TODO:
      - Add content check for images
     """
-    return ai_moderation_service.moderate_and_flag_content(
-        content, content_instance, course_id, backend
+    # Initialize result with default values
+    result = {
+        "is_spam": False,
+        "reasoning": "AI moderation disabled or unavailable",
+        "classification": "not_spam",
+        "actions_taken": ["no_action"],
+        "flagged": False,
+    }
+    
+    # ============================================================================
+    # STEP 1: Check if AI moderation is enabled (waffle flag check)
+    # ============================================================================
+    # pylint: disable=import-outside-toplevel
+    from forum.toggles import (
+        is_ai_moderation_enabled,
+        is_ai_auto_delete_spam_enabled,
     )
+
+    course_key = CourseKey.from_string(course_id) if course_id else None
+    if not is_ai_moderation_enabled(course_key):  # type: ignore[no-untyped-call]
+        return result
+
+    # ============================================================================
+    # STEP 2: Make API request to AI moderation service
+    # ============================================================================
+    api_url = settings.AI_MODERATION_API_URL
+    if not api_url:
+        log.error("AI_MODERATION_API_URL setting is not configured")
+        result["reasoning"] = "AI moderation API not configured"
+        return result
+
+    headers = {
+        "accept": "*/*",
+        "accept-language": "en-US,en;q=0.9",
+        "content-type": "application/json",
+        "user-agent": "Mozilla/5.0 (compatible; edX-Forum-AI-Moderation/1.0)",
+    }
+
+    payload = {
+        "messages": [{"role": "user", "content": content}],
+        "client_id": settings.AI_MODERATION_CLIENT_ID,
+        "system_message": settings.AI_MODERATION_SYSTEM_MESSAGE,
+    }
+
+    try:
+        response = requests.post(
+            api_url,
+            headers=headers,
+            json=payload,
+            timeout=(
+                settings.AI_MODERATION_CONNECTION_TIMEOUT,
+                settings.AI_MODERATION_READ_TIMEOUT,
+            ),
+        )
+        response.raise_for_status()
+
+        response_data = response.json()
+        
+        # Validate response data structure
+        if not isinstance(response_data, list):
+            log.error(
+                f"Expected list response from XPert API, got {type(response_data)}"
+            )
+            result["reasoning"] = "Invalid API response format"
+            return result
+
+        if len(response_data) == 0:
+            log.error("Empty response list from XPert API")
+            result["reasoning"] = "Empty API response"
+            return result
+
+        if not isinstance(response_data[0], dict):
+            log.error(
+                f"Expected dict in response list, got {type(response_data[0])}"
+            )
+            result["reasoning"] = "Invalid API response structure"
+            return result
+
+        assistant_content = response_data[0].get("content", "")
+        
+        # Parse the JSON content from the assistant response
+        try:
+            moderation_result = json.loads(assistant_content)
+            # Include full API response for audit purposes
+            moderation_result["full_api_response"] = response_data
+        except json.JSONDecodeError as e:
+            log.error(f"Failed to parse AI moderation response JSON: {e}")
+            result["reasoning"] = "Failed to parse API response"
+            return result
+            
+    except (requests.RequestException, requests.Timeout, requests.ConnectionError) as e:
+        log.error(f"AI moderation API request failed: {e}")
+        result["reasoning"] = "AI moderation API failed"
+        return result
+
+    # ============================================================================
+    # STEP 3: Process moderation result and determine if content is spam
+    # ============================================================================
+    classification = moderation_result.get("classification", "not_spam")
+    reasoning = moderation_result.get("reasoning", "No reasoning provided")
+    is_spam = classification in ["spam", "spam_or_scam"]
+
+    result.update(
+        {
+            "is_spam": is_spam,
+            "reasoning": reasoning,
+            "classification": classification,
+            "moderation_result": moderation_result,
+        }
+    )
+
+    # If not spam, we're done
+    if not is_spam:
+        result["actions_taken"] = ["no_action"]
+        return result
+
+    # ============================================================================
+    # STEP 4: Flag content as spam and abuse
+    # ============================================================================
+    try:
+        content_instance["is_spam"] = True
+        
+        # Flag content using backend methods
+        content_id = str(content_instance.get("_id"))
+        content_type = str(content_instance.get("_type"))
+        extra_data = {
+            "entity_type": (
+                "CommentThread" if content_type == "CommentThread" else "Comment"
+            )
+        }
+        
+        ai_moderation_user_id = settings.AI_MODERATION_USER_ID
+        if not ai_moderation_user_id:
+            raise ValueError("AI_MODERATION_USER_ID setting is not configured.")
+        
+        backend.flag_content_as_spam(content_type, content_id)
+        backend.flag_as_abuse(str(ai_moderation_user_id), content_id, **extra_data)
+        
+        result["actions_taken"] = ["flagged"]
+        result["flagged"] = True
+        
+    except (AttributeError, ValueError, TypeError) as e:
+        log.error(f"Failed to flag content as spam: {e}")
+        result["actions_taken"] = ["no_action"]
+        # If flagging failed, skip deletion and audit log
+        return result
+
+    # ============================================================================
+    # STEP 5: Optionally soft-delete content if auto-delete is enabled
+    # ============================================================================
+    if is_ai_auto_delete_spam_enabled(course_key):  # type: ignore[no-untyped-call]
+        try:
+            # Import here to avoid circular dependency
+            # pylint: disable=import-outside-toplevel,cyclic-import
+            from forum.api.comments import delete_comment
+            from forum.api.threads import delete_thread
+
+            deleted_by = str(ai_moderation_user_id) if ai_moderation_user_id else None
+
+            # Use API layer functions which handle all business logic
+            if content_type == "CommentThread":
+                delete_thread(content_id, course_id=course_id, deleted_by=deleted_by)
+                log.info(f"AI Moderation Deleted CommentThread: {content_id}")
+            elif content_type == "Comment":
+                delete_comment(content_id, course_id=course_id, deleted_by=deleted_by)
+                log.info(f"AI Moderation Deleted Comment: {content_id}")
+            
+            result["actions_taken"] = result["actions_taken"] + ["soft_deleted"]  # type: ignore[operator]
+            
+        except (ForumV2RequestError, ObjectDoesNotExist, ValidationError) as e:
+            log.error(f"Failed to delete content after flagging: {e}")
+
+    # ============================================================================
+    # STEP 6: Create audit log for spam content
+    # ============================================================================
+    create_moderation_audit_log(
+        content_instance,
+        moderation_result,
+        result["actions_taken"],  # type: ignore[arg-type]
+        _get_author_from_content(content_instance),
+    )
+    
+    return result
