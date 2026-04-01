@@ -136,7 +136,7 @@ def ban_user(
                 log.info(
                     "Cleaned up %d orphaned exception(s) for org ban: ban_id=%s, user_id=%s",
                     deleted_count,
-                    ban.id,
+                    ban.id,  # type: ignore[attr-defined]
                     banned_user.id,  # type: ignore[attr-defined]
                 )
 
@@ -150,7 +150,7 @@ def ban_user(
             scope=scope,
             reason=reason,
             metadata={
-                "ban_id": ban.id,
+                "ban_id": ban.id,  # type: ignore[attr-defined]
                 "created": created,
             },
             # AI moderation fields (required by schema, not applicable for ban actions)
@@ -263,10 +263,10 @@ def unban_user(
 
             exception_created = True
             exception_data = {
-                "id": exception.id,
-                "ban_id": ban.id,
+                "id": exception.id,  # type: ignore[attr-defined]
+                "ban_id": ban.id,  # type: ignore[attr-defined]
                 "course_id": str(course_id),
-                "unbanned_by": moderator.get_username() if moderator else None,
+                "unbanned_by": moderator.username if moderator else None,  # type: ignore[attr-defined]
                 "reason": exception.reason,
                 "created_at": (
                     exception.created.isoformat()
@@ -290,8 +290,8 @@ def unban_user(
                 scope="organization",
                 reason=f"Exception to org ban: {reason}",
                 metadata={
-                    "ban_id": ban.id,
-                    "exception_id": exception.id,
+                    "ban_id": ban.id,  # type: ignore[attr-defined]
+                    "exception_id": exception.id,  # type: ignore[attr-defined]
                     "exception_created": created,
                     "org_key": ban.org_key,
                 },
@@ -324,7 +324,7 @@ def unban_user(
                 scope=ban.scope,
                 reason=f"Unban: {reason}",
                 metadata={
-                    "ban_id": ban.id,
+                    "ban_id": ban.id,  # type: ignore[attr-defined]
                 },
                 # AI moderation fields (required by schema, not applicable for ban actions)
                 body="",
@@ -342,7 +342,7 @@ def unban_user(
             ban_id,
             ban.user.id,
             exception_created,
-            getattr(moderator, "id", None) if moderator else None,
+            moderator.id if moderator else None,  # type: ignore[attr-defined]
         )
 
     return {
@@ -485,7 +485,7 @@ def _serialize_ban(ban: DiscussionBan) -> dict[str, Any]:
         dict: Serialized ban data
     """
     return {
-        "id": ban.id,
+        "id": ban.id,  # type: ignore[attr-defined]
         "user": {
             "id": ban.user.id,
             "username": ban.user.username,
