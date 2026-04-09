@@ -383,7 +383,7 @@ pycparser==2.22
     # via
     #   -r requirements/quality.txt
     #   cffi
-pydantic==2.12.5
+pydantic==2.10.3
     # via
     #   -r requirements/quality.txt
     #   camel-converter
