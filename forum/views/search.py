@@ -4,6 +4,7 @@ Search API Views
 
 from typing import Any
 
+from edx_django_utils.monitoring import set_custom_attribute
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -88,11 +89,31 @@ class SearchThreadsView(APIView):
         Returns:
             Response: A JSON response containing the search results, corrected text (if any), and total results.
         """
+        set_custom_attribute("forum.operation", "search_threads")
 
         try:
             params: dict[str, Any] = self._validate_and_extract_params(request)
         except ValueError as error:
+            set_custom_attribute("forum.error_type", "ValueError")
+            set_custom_attribute("forum.error_message", str(error))
             return Response({"error": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Track search parameters
+        set_custom_attribute("forum.search_text", params.get("text", ""))
+        set_custom_attribute("forum.sort_key", params.get("sort_key", "date"))
+        if params.get("course_id"):
+            set_custom_attribute("forum.course_id", params["course_id"])
+        if params.get("user_id"):
+            set_custom_attribute("forum.user_id", params["user_id"])
+        if params.get("author_id"):
+            set_custom_attribute("forum.author_id", params["author_id"])
+        if params.get("thread_type"):
+            set_custom_attribute("forum.thread_type", params["thread_type"])
+        set_custom_attribute("forum.flagged", params.get("flagged", False))
+        set_custom_attribute("forum.unread", params.get("unread", False))
+        set_custom_attribute("forum.unanswered", params.get("unanswered", False))
+        set_custom_attribute("forum.page", str(params.get("page", 1)))
+        set_custom_attribute("forum.per_page", str(params.get("per_page", 20)))
 
         search_threads_data = search_threads(**params)
 

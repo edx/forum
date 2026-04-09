@@ -1,5 +1,6 @@
 """Forum Flag API Views."""
 
+from edx_django_utils.monitoring import set_custom_attribute
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -31,15 +32,24 @@ class CommentFlagAPIView(APIView):
         Returns:
         Response: A response with the updated comment data.
         """
+        set_custom_attribute("forum.operation", f"{action}_comment")
+        set_custom_attribute("forum.comment_id", comment_id)
+        set_custom_attribute("forum.action", action)
+
         request_data = request.data
         update_all = str_to_bool(request_data.get("all", False))
         user_id = request_data.get("user_id")
+        if user_id:
+            set_custom_attribute("forum.user_id", user_id)
+        set_custom_attribute("forum.update_all", update_all)
+
         try:
             serializer_data = update_comment_flag(
                 comment_id, action, user_id, update_all
             )
             return Response(serializer_data, status=status.HTTP_200_OK)
         except ForumV2RequestError as e:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -64,11 +74,20 @@ class ThreadFlagAPIView(APIView):
         Returns:
         Response: A response with the updated thread data.
         """
+        set_custom_attribute("forum.operation", f"{action}_thread")
+        set_custom_attribute("forum.thread_id", thread_id)
+        set_custom_attribute("forum.action", action)
+
         request_data = request.data
         update_all = str_to_bool(request_data.get("all", False))
         user_id = request_data.get("user_id")
+        if user_id:
+            set_custom_attribute("forum.user_id", user_id)
+        set_custom_attribute("forum.update_all", update_all)
+
         try:
             serializer_data = update_thread_flag(thread_id, action, user_id, update_all)
             return Response(serializer_data, status=status.HTTP_200_OK)
         except ForumV2RequestError as e:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

@@ -24,6 +24,7 @@ from django.db.models import (
     When,
 )
 from django.utils import timezone
+from edx_django_utils.monitoring import set_custom_attribute
 from rest_framework import status
 from rest_framework.response import Response
 
@@ -1044,6 +1045,9 @@ class MySQLBackend(AbstractBackend):
     @staticmethod
     def delete_comments_of_a_thread(thread_id: str) -> None:
         """Delete comments of a thread."""
+        set_custom_attribute("forum.backend", "mysql")
+        set_custom_attribute("forum.backend.operation", "delete_comments")
+        set_custom_attribute("forum.thread_id", thread_id)
         Comment.objects.filter(comment_thread__pk=thread_id, parent=None).delete()
 
     @staticmethod
@@ -1055,6 +1059,12 @@ class MySQLBackend(AbstractBackend):
         Returns:
             tuple: (responses_deleted, replies_deleted)
         """
+        set_custom_attribute("forum.backend", "mysql")
+        set_custom_attribute("forum.backend.operation", "soft_delete_comments")
+        set_custom_attribute("forum.thread_id", thread_id)
+        if deleted_by:
+            set_custom_attribute("forum.deleted_by", deleted_by)
+
         count_of_replies_deleted = 0
         # Only soft-delete responses (parent comments) that aren't already deleted
         count_of_response_deleted = Comment.objects.filter(
@@ -1586,10 +1596,27 @@ class MySQLBackend(AbstractBackend):
     @classmethod
     def create_comment(cls, data: dict[str, Any]) -> str:
         """Handle comment creation and returns a comment."""
-        comment_thread = None
-        parent = None
+        # Track comment creation
+        set_custom_attribute("forum.backend", "mysql")
+        set_custom_attribute("forum.backend.operation", "insert_comment")
+        set_custom_attribute("forum.course_id", data.get("course_id"))
+        set_custom_attribute("forum.author_id", data.get("author_id"))
+
         comment_thread_id = data.get("comment_thread_id")
         parent_id = data.get("parent_id")
+        depth = data.get("depth", 0)
+
+        if comment_thread_id:
+            set_custom_attribute("forum.thread_id", comment_thread_id)
+        if parent_id:
+            set_custom_attribute("forum.parent_comment_id", parent_id)
+            set_custom_attribute("forum.is_child_comment", True)
+        else:
+            set_custom_attribute("forum.is_child_comment", False)
+        set_custom_attribute("forum.comment_depth", str(depth))
+
+        comment_thread = None
+        parent = None
         if comment_thread_id:
             comment_thread = CommentThread.objects.get(pk=int(comment_thread_id))
         if parent_id:
@@ -1624,6 +1651,11 @@ class MySQLBackend(AbstractBackend):
     @classmethod
     def delete_comment(cls, comment_id: str) -> None:
         """Delete comment from comment_id."""
+        set_custom_attribute("forum.backend", "mysql")
+        set_custom_attribute("forum.backend.operation", "delete_comment")
+        set_custom_attribute("forum.comment_id", comment_id)
+        set_custom_attribute("forum.delete_mode", "hard")
+
         comment = Comment.objects.get(pk=comment_id)
         if comment.parent:
             cls.update_child_count_in_parent_comment(str(comment.parent.pk), -1)
@@ -1639,6 +1671,13 @@ class MySQLBackend(AbstractBackend):
         Returns:
             tuple: (responses_deleted, replies_deleted)
         """
+        set_custom_attribute("forum.backend", "mysql")
+        set_custom_attribute("forum.backend.operation", "delete_comment")
+        set_custom_attribute("forum.comment_id", comment_id)
+        set_custom_attribute("forum.delete_mode", "soft")
+        if deleted_by:
+            set_custom_attribute("forum.deleted_by", deleted_by)
+
         comment = Comment.objects.get(pk=comment_id)
         deleted_user: Optional[User] = None
         if deleted_by:
@@ -1982,6 +2021,18 @@ class MySQLBackend(AbstractBackend):
     @staticmethod
     def update_comment(comment_id: str, **kwargs: Any) -> int:
         """Updates a comment in the database."""
+        # Track comment update
+        set_custom_attribute("forum.backend", "mysql")
+        set_custom_attribute("forum.backend.operation", "update_comment")
+        set_custom_attribute("forum.comment_id", comment_id)
+
+        # Track what's being updated
+        update_fields = [k for k in kwargs if kwargs.get(k) is not None]
+        if update_fields:
+            set_custom_attribute("forum.update_fields", ",".join(update_fields))
+        if "course_id" in kwargs:
+            set_custom_attribute("forum.course_id", kwargs["course_id"])
+
         try:
             comment = Comment.objects.get(id=comment_id)
         except Comment.DoesNotExist:
@@ -2182,6 +2233,10 @@ class MySQLBackend(AbstractBackend):
     @staticmethod
     def delete_thread(thread_id: str) -> int:
         """Delete thread from thread_id."""
+        set_custom_attribute("forum.backend", "mysql")
+        set_custom_attribute("forum.backend.operation", "delete_thread")
+        set_custom_attribute("forum.thread_id", thread_id)
+
         try:
             thread = CommentThread.objects.get(pk=thread_id)
         except ObjectDoesNotExist:
@@ -2192,6 +2247,13 @@ class MySQLBackend(AbstractBackend):
     @staticmethod
     def soft_delete_thread(thread_id: str, deleted_by: Optional[str] = None) -> int:
         """Soft delete thread by marking it as deleted."""
+        set_custom_attribute("forum.backend", "mysql")
+        set_custom_attribute("forum.backend.operation", "delete_thread")
+        set_custom_attribute("forum.thread_id", thread_id)
+        set_custom_attribute("forum.delete_mode", "soft")
+        if deleted_by:
+            set_custom_attribute("forum.deleted_by", deleted_by)
+
         try:
             thread = CommentThread.objects.get(pk=thread_id)
         except ObjectDoesNotExist:
@@ -2206,6 +2268,18 @@ class MySQLBackend(AbstractBackend):
     @staticmethod
     def create_thread(data: dict[str, Any]) -> str:
         """Create thread."""
+        # Track thread creation
+        set_custom_attribute("forum.backend", "mysql")
+        set_custom_attribute("forum.backend.operation", "create_thread")
+        set_custom_attribute("forum.course_id", data["course_id"])
+        set_custom_attribute("forum.thread_type", data.get("thread_type", "discussion"))
+        set_custom_attribute(
+            "forum.commentable_id", data.get("commentable_id", "course")
+        )
+        set_custom_attribute("forum.author_id", data["author_id"])
+        if "group_id" in data:
+            set_custom_attribute("forum.group_id", str(data["group_id"]))
+
         optional_args = {}
         if group_id := data.get("group_id"):
             optional_args["group_id"] = group_id
@@ -2230,6 +2304,18 @@ class MySQLBackend(AbstractBackend):
         **kwargs: Any,
     ) -> int:
         """Updates a thread document in the database."""
+        # Track thread update
+        set_custom_attribute("forum.backend", "mysql")
+        set_custom_attribute("forum.backend.operation", "update_thread")
+        set_custom_attribute("forum.thread_id", thread_id)
+
+        # Track what's being updated
+        update_fields = [k for k in kwargs if kwargs.get(k) is not None]
+        if update_fields:
+            set_custom_attribute("forum.update_fields", ",".join(update_fields))
+        if "course_id" in kwargs:
+            set_custom_attribute("forum.course_id", kwargs["course_id"])
+
         thread = CommentThread.objects.get(id=thread_id)
 
         if "thread_type" in kwargs:
@@ -2446,6 +2532,14 @@ class MySQLBackend(AbstractBackend):
         Response:
             The details of the comment that is updated.
         """
+        set_custom_attribute("forum.backend", "mysql")
+        set_custom_attribute("forum.backend.operation", "update_comment")
+        set_custom_attribute("forum.comment_id", comment_id)
+        if course_id:
+            set_custom_attribute("forum.course_id", course_id)
+        if editing_user_id:
+            set_custom_attribute("forum.editing_user_id", editing_user_id)
+
         try:
             comment = Comment.objects.get(id=comment_id)
         except Comment.DoesNotExist:
@@ -2715,37 +2809,6 @@ class MySQLBackend(AbstractBackend):
         else:
             return cls.update_comment(content_id, **update_data)
 
-    @staticmethod
-    def _create_audit_log(
-        action_type: str,
-        user_id: str,
-        course_id: str,
-        muted_user: Any,
-        muter_user: Any,
-        reason: str = "",
-        **extras: Any,
-    ) -> None:
-        """Create audit log entry for mute operations."""
-        try:
-            ModerationAuditLog(
-                timestamp=dt.datetime.now(dt.timezone.utc),
-                body=f"User {action_type}: {user_id}",
-                classifier_output={
-                    "action_type": action_type,
-                    "course_id": course_id,
-                    "muted_user_id": user_id,
-                    "backend": "mysql",
-                    **extras,
-                },
-                reasoning=reason or "No reason provided",
-                actions_taken=[f"user_{action_type}"],
-                original_author=muted_user,
-                moderator=muter_user,
-            ).save()
-        except Exception:  # pylint: disable=broad-exception-caught
-            # Don't fail operations due to audit logging issues
-            pass
-
     # Mute/Unmute Methods for MySQL Backend
     @classmethod
     @_handle_mute_errors
@@ -2801,18 +2864,6 @@ class MySQLBackend(AbstractBackend):
         )
         mute.full_clean()
         mute.save()
-
-        # Create audit log
-        cls._create_audit_log(
-            "mute",
-            muted_user_id,
-            course_id,
-            muted_user,
-            muted_by_user,
-            reason,
-            scope=scope,
-        )
-
         return mute.to_dict()
 
     @classmethod
@@ -2850,9 +2901,9 @@ class MySQLBackend(AbstractBackend):
         mute_query = DiscussionMuteRecord.objects.filter(
             muted_user=muted_user, course_id=course_id, scope=scope, is_active=True
         )
-        # Optimize: Use ID directly instead of fetching user object
         if scope == DiscussionMuteRecord.Scope.PERSONAL and muter_id:
-            mute_query = mute_query.filter(muted_by__pk=int(muter_id))
+            muted_by_user = User.objects.get(pk=int(muter_id))
+            mute_query = mute_query.filter(muted_by=muted_by_user)
 
         mute = mute_query.first()
         if not mute:
@@ -2873,16 +2924,6 @@ class MySQLBackend(AbstractBackend):
         mute.unmuted_by = unmuted_by_user
         mute.unmuted_at = timezone.now()
         mute.save()
-
-        # Create audit log
-        cls._create_audit_log(
-            "unmute",
-            muted_user_id,
-            course_id,
-            muted_user,
-            unmuted_by_user,
-            scope=scope,
-        )
 
         return {
             "message": "User unmuted successfully",
@@ -2922,25 +2963,7 @@ class MySQLBackend(AbstractBackend):
             course_id=course_id,
             scope=scope,
             reason=reason,
-            **kwargs,
         )
-
-        try:
-            muted_user = User.objects.get(id=muted_user_id)
-            muter = User.objects.get(id=muter_id)
-            cls._create_audit_log(
-                "mute_and_report",
-                muted_user_id,
-                course_id,
-                muted_user,
-                muter,
-                reason,
-                reported=True,
-                mute_id=str(mute_result.get("id")),
-            )
-        except Exception:  # pylint: disable=broad-exception-caught
-            # Don't fail the operation due to audit log issues
-            pass
 
         # Add reporting flags
         mute_result["reported"] = True
@@ -2968,43 +2991,37 @@ class MySQLBackend(AbstractBackend):
             Dictionary containing mute status information
         """
         user = User.objects.get(pk=int(muted_user_id))
+        viewer = (
+            User.objects.get(pk=int(requesting_user_id)) if requesting_user_id else None
+        )
 
-        # Optimize: Use single query to get all active mutes for this user in this course
-        mutes_query = DiscussionMuteRecord.objects.filter(
+        # Check for active mutes
+        personal_mutes = DiscussionMuteRecord.objects.filter(
             muted_user=user,
+            muted_by=viewer,
             course_id=course_id,
+            scope=DiscussionMuteRecord.Scope.PERSONAL,
             is_active=True,
         )
 
-        # Filter personal mutes if requesting_user_id is provided
-        if requesting_user_id:
-            mutes_query = mutes_query.filter(
-                Q(scope=DiscussionMuteRecord.Scope.COURSE)
-                | Q(
-                    scope=DiscussionMuteRecord.Scope.PERSONAL,
-                    muted_by__pk=int(requesting_user_id),
-                )
-            )
-        else:
-            # If no requesting_user_id, only return course-wide mutes
-            mutes_query = mutes_query.filter(scope=DiscussionMuteRecord.Scope.COURSE)
+        course_mutes = DiscussionMuteRecord.objects.filter(
+            muted_user=user,
+            course_id=course_id,
+            scope=DiscussionMuteRecord.Scope.COURSE,
+            is_active=True,
+        )
 
-        # Execute single query and separate by scope
-        all_mutes = list(mutes_query)
-        personal_mutes = [
-            m for m in all_mutes if m.scope == DiscussionMuteRecord.Scope.PERSONAL
-        ]
-        course_mutes = [
-            m for m in all_mutes if m.scope == DiscussionMuteRecord.Scope.COURSE
-        ]
+        is_personally_muted = personal_mutes.exists()
+        is_course_muted = course_mutes.exists()
 
         return {
             "user_id": muted_user_id,
             "course_id": course_id,
-            "is_muted": len(all_mutes) > 0,
-            "personal_mute": len(personal_mutes) > 0,
-            "course_mute": len(course_mutes) > 0,
-            "mute_details": [mute.to_dict() for mute in all_mutes],
+            "is_muted": is_personally_muted or is_course_muted,
+            "personal_mute": is_personally_muted,
+            "course_mute": is_course_muted,
+            "mute_details": [mute.to_dict() for mute in personal_mutes]
+            + [mute.to_dict() for mute in course_mutes],
         }
 
     @classmethod
@@ -3093,6 +3110,37 @@ class MySQLBackend(AbstractBackend):
             queryset = queryset.filter(is_active=True)
 
         return [mute.to_dict() for mute in queryset]
+
+    @staticmethod
+    def _create_audit_log(
+        action_type: str,
+        user_id: str,
+        course_id: str,
+        muted_user: Any,
+        muter_user: Any,
+        reason: str = "",
+        **extras: Any,
+    ) -> None:
+        """Create audit log entry for mute operations."""
+        try:
+            ModerationAuditLog(
+                timestamp=dt.datetime.now(dt.timezone.utc),
+                body=f"User {action_type}: {user_id}",
+                classifier_output={
+                    "action_type": action_type,
+                    "course_id": course_id,
+                    "muted_user_id": user_id,
+                    "backend": "mysql",
+                    **extras,
+                },
+                reasoning=reason or "No reason provided",
+                actions_taken=[f"user_{action_type}"],
+                original_author=muted_user,
+                moderator=muter_user,
+            ).save()
+        except Exception:  # pylint: disable=broad-exception-caught
+            # Don't fail operations due to audit logging issues
+            pass
 
     @staticmethod
     def get_deleted_threads_for_course(

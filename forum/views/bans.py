@@ -5,6 +5,7 @@ API Views for managing discussion bans.
 import logging
 
 from django.contrib.auth import get_user_model
+from edx_django_utils.monitoring import set_custom_attribute
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -58,6 +59,8 @@ class BanUserAPIView(APIView):
 
     def post(self, request: Request) -> Response:
         """Ban a user from discussions."""
+        set_custom_attribute("forum.operation", "ban_user")
+
         serializer = BanUserSerializer(data=request.data)
 
         if not serializer.is_valid():
@@ -71,9 +74,19 @@ class BanUserAPIView(APIView):
             user = User.objects.get(id=user_id)
             banned_by = User.objects.get(id=banned_by_id)
 
+            # Track ban details
+            set_custom_attribute("forum.user_id", str(user_id))
+            set_custom_attribute("forum.banned_by_id", str(banned_by_id))
+            set_custom_attribute("forum.ban_scope", validated_data.get("scope", ""))
+            if validated_data.get("course_id"):
+                set_custom_attribute("forum.course_id", validated_data["course_id"])
+            if validated_data.get("org_key"):
+                set_custom_attribute("forum.org_key", validated_data["org_key"])
+
             ban_data = ban_user(user=user, banned_by=banned_by, **validated_data)
             return Response(ban_data, status=status.HTTP_201_CREATED)
         except (ValueError, TypeError) as e:
+            set_custom_attribute("forum.error_type", type(e).__name__)
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
             return Response(
@@ -114,6 +127,9 @@ class UnbanUserAPIView(APIView):
 
     def post(self, request: Request, ban_id: int) -> Response:
         """Unban a user from discussions."""
+        set_custom_attribute("forum.operation", "unban_user")
+        set_custom_attribute("forum.ban_id", str(ban_id))
+
         serializer = UnbanUserSerializer(data=request.data)
 
         if not serializer.is_valid():
@@ -125,15 +141,23 @@ class UnbanUserAPIView(APIView):
             unbanned_by_id = validated_data.pop("unbanned_by_id")
             unbanned_by = User.objects.get(id=unbanned_by_id)
 
+            set_custom_attribute("forum.unbanned_by_id", str(unbanned_by_id))
+            if validated_data.get("course_id"):
+                set_custom_attribute("forum.course_id", validated_data["course_id"])
+
             unban_data = unban_user(
                 ban_id=ban_id, unbanned_by=unbanned_by, **validated_data
             )
             return Response(unban_data, status=status.HTTP_200_OK)
         except ValueError as e:
             if "not found" in str(e).lower():
+                set_custom_attribute("forum.error_type", "ValueError")
+                set_custom_attribute("forum.error_kind", "not_found")
                 return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
+            set_custom_attribute("forum.error_type", "ValueError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except TypeError as e:
+            set_custom_attribute("forum.error_type", "TypeError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except DiscussionBan.DoesNotExist:
             return Response(
@@ -185,16 +209,28 @@ class BannedUsersAPIView(APIView):
 
     def get(self, request: Request) -> Response:
         """Get list of banned users."""
+        set_custom_attribute("forum.operation", "get_banned_users")
+
         serializer = BannedUsersListSerializer(data=request.query_params)
 
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            banned_users = get_banned_users(**serializer.validated_data)
+            validated_data = serializer.validated_data
+            if validated_data.get("course_id"):
+                set_custom_attribute("forum.course_id", validated_data["course_id"])
+            if validated_data.get("org_key"):
+                set_custom_attribute("forum.org_key", validated_data["org_key"])
+            set_custom_attribute(
+                "forum.include_inactive", validated_data.get("include_inactive", False)
+            )
+
+            banned_users = get_banned_users(**validated_data)
             response_serializer = BannedUserResponseSerializer(banned_users, many=True)
             return Response(response_serializer.data, status=status.HTTP_200_OK)
         except (ValueError, TypeError) as e:
+            set_custom_attribute("forum.error_type", type(e).__name__)
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:  # pylint: disable=broad-exception-caught
             log.exception("Error fetching banned users: %s", str(e))
@@ -230,15 +266,20 @@ class BanDetailAPIView(APIView):
 
     def get(self, request: Request, ban_id: int) -> Response:
         """Get details of a specific ban."""
+        set_custom_attribute("forum.operation", "get_ban_details")
+        set_custom_attribute("forum.ban_id", str(ban_id))
+
         try:
             ban_data = get_ban(ban_id)
             if ban_data is None:
+                set_custom_attribute("forum.error_kind", "not_found")
                 return Response(
                     {"error": f"Ban with id {ban_id} not found"},
                     status=status.HTTP_404_NOT_FOUND,
                 )
             return Response(ban_data, status=status.HTTP_200_OK)
         except (ValueError, TypeError) as e:
+            set_custom_attribute("forum.error_type", type(e).__name__)
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:  # pylint: disable=broad-exception-caught
             log.exception("Error fetching ban details: %s", str(e))

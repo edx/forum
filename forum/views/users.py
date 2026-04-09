@@ -3,6 +3,7 @@
 import logging
 from typing import Any
 
+from edx_django_utils.monitoring import set_custom_attribute
 from rest_framework import status
 from rest_framework.exceptions import ParseError
 from rest_framework.permissions import AllowAny
@@ -33,22 +34,33 @@ class UserAPIView(APIView):
 
     def get(self, request: Request, user_id: str) -> Response:
         """Get user data."""
+        set_custom_attribute("forum.operation", "get_user")
+        set_custom_attribute("forum.user_id", user_id)
+
         params = request.GET.dict()
         course_id = params.get("course_id", "")
         group_ids = get_group_ids_from_params(params)
         complete = str_to_bool(params.get("complete", False))
+
+        if course_id:
+            set_custom_attribute("forum.course_id", course_id)
+        set_custom_attribute("forum.complete", complete)
 
         try:
             user_data: dict[str, Any] = get_user(
                 user_id, group_ids, course_id, complete
             )
         except ForumV2RequestError as e:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
 
         return Response(user_data, status=status.HTTP_200_OK)
 
     def put(self, request: Request, user_id: str) -> Response:
         """Update user data."""
+        set_custom_attribute("forum.operation", "update_user")
+        set_custom_attribute("forum.user_id", user_id)
+
         try:
             params = request.data
             username = params.get("username")
@@ -56,6 +68,12 @@ class UserAPIView(APIView):
             course_id = params.get("course_id")
             group_ids = params.get("group_ids")
             complete = params.get("complete")
+
+            if course_id:
+                set_custom_attribute("forum.course_id", course_id)
+            if username:
+                set_custom_attribute("forum.username", username)
+
             updated_user = update_user(
                 user_id,
                 username,
@@ -65,6 +83,7 @@ class UserAPIView(APIView):
                 complete,
             )
         except ForumV2RequestError as e:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(updated_user, status=status.HTTP_200_OK)
@@ -77,6 +96,8 @@ class UserCreateAPIView(APIView):
 
     def post(self, request: Request) -> Response:
         """Create user."""
+        set_custom_attribute("forum.operation", "create_user")
+
         params = request.data
         for key in params:
             if key not in ["id", "username"]:
@@ -85,9 +106,17 @@ class UserCreateAPIView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         try:
+            user_id = params.get("id")
+            username = params.get("username")
+
+            if user_id:
+                set_custom_attribute("forum.user_id", user_id)
+            if username:
+                set_custom_attribute("forum.username", username)
+
             data: dict[str, Any] = {
-                "user_id": params.get("id"),
-                "username": params.get("username"),
+                "user_id": user_id,
+                "username": username,
                 "default_sort_key": params.get("default_sort_key", "date"),
                 "course_id": params.get("course_id"),
                 "group_ids": params.get("group_ids"),
@@ -95,6 +124,7 @@ class UserCreateAPIView(APIView):
             }
             user_data = create_user(**data)
         except ForumV2RequestError as e:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(user_data, status=status.HTTP_200_OK)
 
@@ -104,6 +134,9 @@ class UserEditAPIView(APIView):
 
     def post(self, request: Request, user_id: str) -> Response:
         """Edit user."""
+        set_custom_attribute("forum.operation", "update_username")
+        set_custom_attribute("forum.user_id", user_id)
+
         error_500_response = Response(
             {"message": "Missing new_username param."},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -115,9 +148,13 @@ class UserEditAPIView(APIView):
         new_username = params.get("new_username")
         if not new_username:
             return error_500_response
+
+        set_custom_attribute("forum.new_username", new_username)
+
         try:
             update_username(user_id, new_username)
         except ForumV2RequestError as e:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(status=status.HTTP_200_OK)
 
@@ -129,6 +166,9 @@ class UserRetireAPIView(APIView):
 
     def post(self, request: Request, user_id: str) -> Response:
         """Retire user."""
+        set_custom_attribute("forum.operation", "retire_user")
+        set_custom_attribute("forum.user_id", user_id)
+
         error_500_response = Response(
             {"message": "Missing retired_username param."},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -140,9 +180,13 @@ class UserRetireAPIView(APIView):
         retired_username = params.get("retired_username")
         if not retired_username:
             return error_500_response
+
+        set_custom_attribute("forum.retired_username", retired_username)
+
         try:
             retire_user(user_id, retired_username)
         except ForumV2RequestError as e:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(status=status.HTTP_200_OK)
 
@@ -154,6 +198,9 @@ class UserReadAPIView(APIView):
 
     def post(self, request: Request, user_id: str) -> Response:
         """User read."""
+        set_custom_attribute("forum.operation", "mark_thread_as_read")
+        set_custom_attribute("forum.user_id", user_id)
+
         params = request.data
         data = {
             "source_id": params.get("source_id", ""),
@@ -161,9 +208,16 @@ class UserReadAPIView(APIView):
             "course_id": params.get("course_id"),
             "group_ids": params.get("group_ids"),
         }
+
+        if data.get("source_id"):
+            set_custom_attribute("forum.source_id", data["source_id"])
+        if data.get("course_id"):
+            set_custom_attribute("forum.course_id", data["course_id"])
+
         try:
             serialized_data = mark_thread_as_read(user_id, **data)
         except ForumV2RequestError as e:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(serialized_data, status=status.HTTP_200_OK)
 
@@ -175,8 +229,14 @@ class UserActiveThreadsAPIView(APIView):
 
     def get(self, request: Request, user_id: str) -> Response:
         """User active threads."""
+        set_custom_attribute("forum.operation", "get_user_active_threads")
+        set_custom_attribute("forum.user_id", user_id)
+
         params: dict[str, Any] = request.GET.dict()
         course_id = params.pop("course_id", None)
+
+        if course_id:
+            set_custom_attribute("forum.course_id", course_id)
 
         if page := params.get("page"):
             params["page"] = int(page)
@@ -197,6 +257,7 @@ class UserActiveThreadsAPIView(APIView):
         try:
             serialized_data = get_user_active_threads(user_id, course_id, **params)
         except ForumV2RequestError as e:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(serialized_data)
 
@@ -208,6 +269,9 @@ class UserCourseStatsAPIView(APIView):
 
     def get(self, request: Request, course_id: str) -> Response:
         """Get user course stats."""
+        set_custom_attribute("forum.operation", "get_user_course_stats")
+        set_custom_attribute("forum.course_id", course_id)
+
         params: dict[str, Any] = request.GET.dict()
         if page := params.get("page"):
             params["page"] = int(page)
@@ -224,5 +288,8 @@ class UserCourseStatsAPIView(APIView):
 
     def post(self, request: Request, course_id: str) -> Response:
         """Update user stats for a course."""
+        set_custom_attribute("forum.operation", "update_users_in_course")
+        set_custom_attribute("forum.course_id", course_id)
+
         updated_users = update_users_in_course(course_id)
         return Response(updated_users, status=status.HTTP_200_OK)

@@ -3,6 +3,7 @@
 import logging
 from typing import Any
 
+from edx_django_utils.monitoring import set_custom_attribute
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -34,11 +35,17 @@ class PinThreadAPIView(APIView):
         Response:
             A response with the updated thread data.
         """
+        set_custom_attribute("forum.operation", "pin_thread")
+        set_custom_attribute("forum.thread_id", thread_id)
+
+        user_id = request.data.get("user_id", "")
+        if user_id:
+            set_custom_attribute("forum.user_id", user_id)
+
         try:
-            thread_data: dict[str, Any] = pin_thread(
-                request.data.get("user_id", ""), thread_id
-            )
+            thread_data: dict[str, Any] = pin_thread(user_id, thread_id)
         except ForumV2RequestError as e:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(thread_data, status=status.HTTP_200_OK)
@@ -63,11 +70,17 @@ class UnpinThreadAPIView(APIView):
         Response:
             A response with the updated thread data.
         """
+        set_custom_attribute("forum.operation", "unpin_thread")
+        set_custom_attribute("forum.thread_id", thread_id)
+
+        user_id = request.data.get("user_id", "")
+        if user_id:
+            set_custom_attribute("forum.user_id", user_id)
+
         try:
-            thread_data: dict[str, Any] = unpin_thread(
-                request.data.get("user_id", ""), thread_id
-            )
+            thread_data: dict[str, Any] = unpin_thread(user_id, thread_id)
         except ForumV2RequestError as e:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(thread_data, status=status.HTTP_200_OK)
