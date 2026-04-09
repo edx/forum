@@ -48,7 +48,7 @@ click-plugins==1.1.1.2
     # via celery
 click-repl==0.3.0
     # via celery
-code-annotations==3.0.0
+code-annotations==2.3.2
     # via edx-toggles
 ddtrace==4.6.7
     # via -r requirements/base.in

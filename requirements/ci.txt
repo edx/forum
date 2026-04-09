@@ -99,7 +99,7 @@ click-repl==0.3.0
     # via
     #   -r requirements/quality.txt
     #   celery
-code-annotations==3.0.0
+code-annotations==2.3.2
     # via
     #   -r requirements/quality.txt
     #   edx-lint
