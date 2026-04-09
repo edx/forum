@@ -3,6 +3,7 @@
 import logging
 from typing import Any
 
+from edx_django_utils.monitoring import set_custom_attribute  # type: ignore[import-untyped]
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -42,10 +43,25 @@ class ThreadsAPIView(APIView):
         Returns:
             Response: A Response object containing the serialized thread data or an error message.
         """
+        set_custom_attribute("forum.operation", "get_thread")
+        set_custom_attribute("forum.thread_id", thread_id)
+
         try:
             params = request.query_params.dict()
+
+            # Track request parameters
+            if "user_id" in params:
+                set_custom_attribute("forum.user_id", params["user_id"])
+            if "with_responses" in params:
+                set_custom_attribute("forum.with_responses", params["with_responses"])
+            if "resp_limit" in params:
+                set_custom_attribute("forum.resp_limit", params["resp_limit"])
+            if "resp_skip" in params:
+                set_custom_attribute("forum.resp_skip", params["resp_skip"])
+
             data = get_thread(thread_id, params)
         except ForumV2RequestError as error:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response(
                 {"error": str(error)},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -64,10 +80,14 @@ class ThreadsAPIView(APIView):
         Response:
             The details of the thread that is deleted.
         """
+        set_custom_attribute("forum.operation", "delete_thread")
+        set_custom_attribute("forum.thread_id", thread_id)
+
         try:
             serialized_data = delete_thread(thread_id)
             return Response(serialized_data, status=status.HTTP_200_OK)
         except ForumV2RequestError as error:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response(
                 {"error": str(error)},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -85,11 +105,21 @@ class ThreadsAPIView(APIView):
         Response:
             The details of the thread that is updated.
         """
+        set_custom_attribute("forum.operation", "update_thread")
+        set_custom_attribute("forum.thread_id", thread_id)
+
+        # Track what fields are being updated
+        if request.data:
+            update_fields = list(request.data.keys())
+            set_custom_attribute("forum.update_fields", ",".join(update_fields))
+            if "course_id" in request.data:
+                set_custom_attribute("forum.course_id", request.data["course_id"])
 
         try:
             serialized_data = update_thread(thread_id, **request.data)
             return Response(serialized_data, status=status.HTTP_200_OK)
         except ForumV2RequestError as error:
+            set_custom_attribute("forum.error_type", "ForumV2RequestError")
             return Response(
                 {"error": str(error)},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -117,6 +147,19 @@ class CreateThreadAPIView(APIView):
         Response:
             The details of the thread that is created.
         """
+        set_custom_attribute("forum.operation", "create_thread")
+
+        # Track thread creation context
+        if "course_id" in request.data:
+            set_custom_attribute("forum.course_id", request.data["course_id"])
+        if "thread_type" in request.data:
+            set_custom_attribute("forum.thread_type", request.data["thread_type"])
+        if "commentable_id" in request.data:
+            set_custom_attribute("forum.commentable_id", request.data["commentable_id"])
+        if "user_id" in request.data:
+            set_custom_attribute("forum.author_id", request.data["user_id"])
+        if "group_id" in request.data:
+            set_custom_attribute("forum.group_id", str(request.data["group_id"]))
 
         try:
             params = request.data
@@ -127,6 +170,7 @@ class CreateThreadAPIView(APIView):
             serialized_data = create_thread(**params)
             return Response(serialized_data, status=status.HTTP_200_OK)
         except (TypeError, ForumV2RequestError) as error:
+            set_custom_attribute("forum.error_type", type(error).__name__)
             return Response(
                 {"error": str(error)},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -155,11 +199,31 @@ class UserThreadsAPIView(APIView):
         Raises:
             HTTP_400_BAD_REQUEST: If the user does not exist.
         """
+        set_custom_attribute("forum.operation", "get_user_threads")
+
         try:
             params: dict[str, Any] = request.GET.dict()
+
+            # Track query parameters
+            if params.get("course_id"):
+                set_custom_attribute("forum.course_id", params["course_id"])
+            if params.get("user_id"):
+                set_custom_attribute("forum.user_id", params["user_id"])
+            if params.get("author_id"):
+                set_custom_attribute("forum.author_id", params["author_id"])
+            if params.get("thread_type"):
+                set_custom_attribute("forum.thread_type", params["thread_type"])
+            if params.get("sort_key"):
+                set_custom_attribute("forum.sort_key", params["sort_key"])
+            if params.get("page"):
+                set_custom_attribute("forum.page", str(params["page"]))
+            if params.get("per_page"):
+                set_custom_attribute("forum.per_page", str(params["per_page"]))
+
             serialized_data = get_user_threads(**params)
             return Response(serialized_data, status=status.HTTP_200_OK)
         except (TypeError, ValueError, ForumV2RequestError) as error:
+            set_custom_attribute("forum.error_type", type(error).__name__)
             return Response(
                 {"error": str(error)},
                 status=status.HTTP_400_BAD_REQUEST,

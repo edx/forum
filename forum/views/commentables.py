@@ -1,5 +1,6 @@
 """Forum Comments API Views."""
 
+from edx_django_utils.monitoring import set_custom_attribute  # type: ignore[import-untyped]
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -28,6 +29,9 @@ class CommentablesCountAPIView(APIView):
         Response:
             The threads count for the given course_id based on thread_type.
         """
+        set_custom_attribute("forum.operation", "get_commentables_stats")
+        set_custom_attribute("forum.course_id", course_id)
+
         commentable_counts = get_commentables_stats(course_id)
         return Response(
             commentable_counts,
