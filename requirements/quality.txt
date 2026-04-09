@@ -24,7 +24,7 @@ astroid==4.0.4
     # via
     #   pylint
     #   pylint-celery
-attrs==23.2.0
+attrs==26.1.0
     # via
     #   -r requirements/test.txt
     #   openedx-events
@@ -52,7 +52,7 @@ celery==5.6.3
     # via
     #   -r requirements/test.txt
     #   event-tracking
-certifi==2024.8.30
+certifi==2026.2.25
     # via
     #   -r requirements/test.txt
     #   elasticsearch
@@ -93,7 +93,7 @@ click-repl==0.3.0
     # via
     #   -r requirements/test.txt
     #   celery
-code-annotations==2.3.2
+code-annotations==3.0.0
     # via
     #   -r requirements/test.txt
     #   edx-lint
@@ -312,7 +312,7 @@ nh3==0.3.4
     #   readme-renderer
 openedx-atlas==0.7.0
     # via -r requirements/test.txt
-openedx-events==10.5.0
+openedx-events==11.1.1
     # via
     #   -r requirements/test.txt
     #   event-tracking
@@ -320,7 +320,7 @@ opentelemetry-api==1.40.0
     # via
     #   -r requirements/test.txt
     #   ddtrace
-packaging==24.1
+packaging==26.0
     # via
     #   -r requirements/test.txt
     #   build
@@ -349,21 +349,21 @@ prompt-toolkit==3.0.52
     # via
     #   -r requirements/test.txt
     #   click-repl
-psutil==6.1.0
+psutil==7.2.2
     # via
     #   -r requirements/test.txt
     #   edx-django-utils
 pycodestyle==2.14.0
     # via -r requirements/quality.in
-pycparser==2.22
+pycparser==3.0
     # via
     #   -r requirements/test.txt
     #   cffi
-pydantic==2.10.3
+pydantic==2.12.5
     # via
     #   -r requirements/test.txt
     #   camel-converter
-pydantic-core==2.27.0
+pydantic-core==2.41.5
     # via
     #   -r requirements/test.txt
     #   pydantic
@@ -389,7 +389,7 @@ pylint-plugin-utils==0.9.0
     # via
     #   pylint-celery
     #   pylint-django
-pymongo==4.10.1
+pymongo==4.16.0
     # via
     #   -r requirements/test.txt
     #   edx-opaque-keys
@@ -428,7 +428,7 @@ python-slugify==8.0.4
     # via
     #   -r requirements/test.txt
     #   code-annotations
-pytz==2024.2
+pytz==2026.1.post1
     # via
     #   -r requirements/test.txt
     #   event-tracking
@@ -441,7 +441,7 @@ readme-renderer==44.0
     # via
     #   -r requirements/test.txt
     #   twine
-requests==2.32.3
+requests==2.33.1
     # via
     #   -r requirements/test.txt
     #   id
@@ -477,7 +477,7 @@ six==1.17.0
     #   python-dateutil
 snowballstemmer==3.0.1
     # via pydocstyle
-soupsieve==2.6
+soupsieve==2.8.3
     # via
     #   -r requirements/test.txt
     #   beautifulsoup4
@@ -523,7 +523,7 @@ typesense==2.0.0
     # via
     #   -r requirements/test.txt
     #   edx-search
-typing-extensions==4.12.2
+typing-extensions==4.15.0
     # via
     #   -r requirements/test.txt
     #   anyio

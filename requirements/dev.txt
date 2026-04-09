@@ -30,7 +30,7 @@ astroid==4.0.4
     #   -r requirements/quality.txt
     #   pylint
     #   pylint-celery
-attrs==23.2.0
+attrs==26.1.0
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
@@ -72,7 +72,7 @@ celery==5.6.3
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
     #   event-tracking
-certifi==2024.8.30
+certifi==2026.2.25
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
@@ -128,7 +128,7 @@ click-repl==0.3.0
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
     #   celery
-code-annotations==2.3.2
+code-annotations==3.0.0
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
@@ -440,7 +440,7 @@ openedx-atlas==0.7.0
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
-openedx-events==10.5.0
+openedx-events==11.1.1
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
@@ -450,7 +450,7 @@ opentelemetry-api==1.40.0
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
     #   ddtrace
-packaging==24.1
+packaging==26.0
     # via
     #   -r requirements/ci.txt
     #   -r requirements/pip-tools.txt
@@ -498,7 +498,7 @@ prompt-toolkit==3.0.52
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
     #   click-repl
-psutil==6.1.0
+psutil==7.2.2
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
@@ -507,17 +507,17 @@ pycodestyle==2.14.0
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
-pycparser==2.22
+pycparser==3.0
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
     #   cffi
-pydantic==2.10.3
+pydantic==2.12.5
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
     #   camel-converter
-pydantic-core==2.27.0
+pydantic-core==2.41.5
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
@@ -558,7 +558,7 @@ pylint-plugin-utils==0.9.0
     #   -r requirements/quality.txt
     #   pylint-celery
     #   pylint-django
-pymongo==4.10.1
+pymongo==4.16.0
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
@@ -615,7 +615,7 @@ pytokens==0.4.1
     # via
     #   -r requirements/ci.txt
     #   black
-pytz==2024.2
+pytz==2026.1.post1
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
@@ -632,7 +632,7 @@ readme-renderer==44.0
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
     #   twine
-requests==2.32.3
+requests==2.33.1
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
@@ -678,7 +678,7 @@ snowballstemmer==3.0.1
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
     #   pydocstyle
-soupsieve==2.6
+soupsieve==2.8.3
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
@@ -752,7 +752,7 @@ typesense==2.0.0
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
     #   edx-search
-typing-extensions==4.12.2
+typing-extensions==4.15.0
     # via
     #   -r requirements/ci.txt
     #   -r requirements/quality.txt
