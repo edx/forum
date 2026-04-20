@@ -44,7 +44,7 @@ from forum.backends.mysql.models import (
     UserVote,
 )
 from forum.constants import RETIRED_BODY, RETIRED_TITLE
-from forum.utils import get_group_ids_from_params
+from forum.utils import get_group_ids_from_params, get_handler_by_name
 
 FuncType = TypeVar("FuncType", bound=Callable[..., Any])
 
@@ -1683,7 +1683,15 @@ class MySQLBackend(AbstractBackend):
             cls.update_stats_for_course(
                 data["author_id"], data["course_id"], responses=1
             )
-        return str(new_comment.pk)
+
+        comment_id = str(new_comment.pk)
+
+        # Notify comment inserted for search indexing
+        get_handler_by_name("comment_inserted").send(
+            sender=Comment, comment_id=comment_id
+        )
+
+        return comment_id
 
     @classmethod
     def delete_comment(cls, comment_id: str) -> None:
@@ -2173,6 +2181,12 @@ class MySQLBackend(AbstractBackend):
 
         comment.updated_at = timezone.now()
         comment.save()
+
+        # Notify comment updated for search indexing
+        get_handler_by_name("comment_updated").send(
+            sender=Comment, comment_id=comment_id
+        )
+
         return 1
 
     @staticmethod
@@ -2286,7 +2300,14 @@ class MySQLBackend(AbstractBackend):
             last_activity_at=timezone.now(),
             **optional_args,
         )
-        return str(new_thread.pk)
+        thread_id = str(new_thread.pk)
+
+        # Notify thread inserted for search indexing
+        get_handler_by_name("comment_thread_inserted").send(
+            sender=CommentThread, comment_thread_id=thread_id
+        )
+
+        return thread_id
 
     @staticmethod
     def update_thread(
@@ -2402,6 +2423,12 @@ class MySQLBackend(AbstractBackend):
 
         thread.updated_at = timezone.now()
         thread.save()
+
+        # Notify thread updated for search indexing
+        get_handler_by_name("comment_thread_updated").send(
+            sender=CommentThread, comment_thread_id=thread_id
+        )
+
         return 1
 
     @staticmethod
