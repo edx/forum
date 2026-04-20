@@ -14,6 +14,27 @@ from forum.models import Comment, CommentThread
 log = logging.getLogger(__name__)
 
 
+def _get_document_from_backend(sender: Any, document_id: str) -> dict[str, Any]:
+    """
+    Get document hash from either MySQL or MongoDB backend.
+
+    Args:
+        sender: The model class (MySQL or MongoDB)
+        document_id: The ID of the document
+
+    Returns:
+        dict: The document hash ready for indexing
+    """
+    if hasattr(sender, "objects"):
+        # MySQL/Django model
+        instance = sender.objects.get(pk=document_id)
+        return instance.doc_to_hash()
+    else:
+        # MongoDB model
+        doc = sender().get(_id=document_id)
+        return sender().doc_to_hash(doc)
+
+
 def handle_comment_thread_deletion(sender: Any, **kwargs: dict[str, str]) -> None:
     """
     Handle the deletion of a comment thread from the Elasticsearch index.
@@ -49,8 +70,7 @@ def handle_comment_thread_insertion(sender: Any, **kwargs: dict[str, Any]) -> No
         **kwargs (dict[str, Any]): Additional arguments, including 'comment_thread_id'.
     """
     thread_id = get_str_value_from_collection(kwargs, "comment_thread_id")
-    thread = sender().get(_id=thread_id)
-    doc = sender().doc_to_hash(thread)
+    doc = _get_document_from_backend(sender, thread_id)
     get_document_search_backend().index_document(sender.index_name, thread_id, doc)
     log.info(f"Thread {thread_id} added to Elasticsearch index")
 
@@ -64,8 +84,7 @@ def handle_comment_insertion(sender: Any, **kwargs: dict[str, Any]) -> None:
         **kwargs (dict[str, Any]): Additional arguments, including 'comment_id'.
     """
     comment_id = get_str_value_from_collection(kwargs, "comment_id")
-    comment = sender().get(_id=comment_id)
-    doc = sender().doc_to_hash(comment)
+    doc = _get_document_from_backend(sender, comment_id)
     get_document_search_backend().index_document(sender.index_name, comment_id, doc)
     log.info(f"Comment {comment_id} added to Elasticsearch index")
 
@@ -79,8 +98,7 @@ def handle_comment_thread_updated(sender: Any, **kwargs: dict[str, Any]) -> None
         **kwargs (dict[str, Any]): Additional arguments, including 'comment_thread_id'.
     """
     thread_id = get_str_value_from_collection(kwargs, "comment_thread_id")
-    thread = sender().get(_id=thread_id)
-    doc = sender().doc_to_hash(thread)
+    doc = _get_document_from_backend(sender, thread_id)
     get_document_search_backend().update_document(sender.index_name, thread_id, doc)
     log.info(f"Thread {thread_id} added to Elasticsearch index")
 
@@ -94,8 +112,7 @@ def handle_comment_updated(sender: Any, **kwargs: dict[str, Any]) -> None:
         **kwargs (dict[str, Any]): Additional arguments, including 'comment_id'.
     """
     comment_id = get_str_value_from_collection(kwargs, "comment_id")
-    comment = sender().get(_id=comment_id)
-    doc = sender().doc_to_hash(comment)
+    doc = _get_document_from_backend(sender, comment_id)
     get_document_search_backend().update_document(sender.index_name, comment_id, doc)
     log.info(f"Comment {comment_id} added to Elasticsearch index")
 
