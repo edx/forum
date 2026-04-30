@@ -2,6 +2,7 @@
 
 from typing import Any, Optional
 
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import status
 from rest_framework.serializers import ValidationError
 
@@ -50,13 +51,16 @@ def set_forum_trace_context(
     entity_type: str,
     entity_id: str = "",
     course_id: str = "",
+    actor_id: str = "",
     data: Optional[Any] = None,
 ) -> None:
     """Attach canonical request context for native forum API traces."""
     set_custom_attribute("forum.operation", operation)
     set_custom_attribute("forum.entity_type", entity_type)
     set_custom_attribute("forum.entity_id", str(entity_id or ""))
-    set_custom_attribute("forum.actor_id", _get_actor_id(request, data))
+    set_custom_attribute(
+        "forum.actor_id", str(actor_id or _get_actor_id(request, data))
+    )
     set_custom_attribute(
         "forum.course_id", str(course_id or _get_value(data, "course_id"))
     )
@@ -109,7 +113,14 @@ def forum_error_type(exc: Exception) -> str:
     """Map native forum view failures to stable Datadog error types."""
     if isinstance(
         exc,
-        (ForumV2RequestError, KeyError, TypeError, ValueError, ValidationError),
+        (
+            ForumV2RequestError,
+            KeyError,
+            ObjectDoesNotExist,
+            TypeError,
+            ValueError,
+            ValidationError,
+        ),
     ):
         return "validation_error"
     return "backend_error"
