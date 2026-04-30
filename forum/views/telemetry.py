@@ -3,6 +3,7 @@
 from typing import Any, Optional
 
 from rest_framework import status
+from rest_framework.serializers import ValidationError
 
 from forum.utils import ForumV2RequestError
 
@@ -73,6 +74,15 @@ def set_forum_thread_context(data: dict[str, Any]) -> None:
         set_custom_attribute("forum.group_id", str(data.get("group_id")))
 
 
+def set_forum_comment_context(data: dict[str, Any]) -> None:
+    """Attach comment-specific context after a native forum comment operation."""
+    set_custom_attribute("forum.entity_id", _get_value(data, "id"))
+    set_custom_attribute("forum.course_id", _get_value(data, "course_id"))
+    parent_id = _get_value(data, "parent_id")
+    if parent_id:
+        set_custom_attribute("forum.parent_comment_id", parent_id)
+
+
 def set_forum_update_fields(data: Any) -> None:
     """Attach a stable comma-separated list of fields updated by a request."""
     if not hasattr(data, "items"):
@@ -97,6 +107,9 @@ def set_forum_trace_outcome(
 
 def forum_error_type(exc: Exception) -> str:
     """Map native forum view failures to stable Datadog error types."""
-    if isinstance(exc, (ForumV2RequestError, KeyError, TypeError, ValueError)):
+    if isinstance(
+        exc,
+        (ForumV2RequestError, KeyError, TypeError, ValueError, ValidationError),
+    ):
         return "validation_error"
     return "backend_error"

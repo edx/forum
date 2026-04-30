@@ -16,6 +16,7 @@ from forum.api.votes import (
 from forum.utils import ForumV2RequestError
 from forum.views.telemetry import (
     forum_error_type,
+    set_forum_comment_context,
     set_forum_thread_context,
     set_forum_trace_context,
     set_forum_trace_outcome,
@@ -152,13 +153,27 @@ class CommentVoteView(APIView):
         Returns:
             Response: The HTTP response with the result of the vote operation.
         """
+        request_data = request.data
+        set_forum_trace_context(
+            request,
+            "comment.vote",
+            "comment",
+            entity_id=comment_id,
+            data=request_data,
+        )
         try:
             comment_response = update_comment_votes(
-                comment_id, request.data["user_id"], request.data["value"]
+                comment_id, request_data["user_id"], request_data["value"]
             )
         except (ForumV2RequestError, KeyError) as e:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(e),
+            )
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        set_forum_comment_context(comment_response)
+        set_forum_trace_outcome(status.HTTP_200_OK)
         return Response(comment_response, status=status.HTTP_200_OK)
 
     def delete(self, request: Request, comment_id: str) -> Response:
@@ -172,10 +187,25 @@ class CommentVoteView(APIView):
         Returns:
             Response: The HTTP response with the result of the remove vote operation.
         """
+        request_params = request.query_params.dict()
+        set_forum_trace_context(
+            request,
+            "comment.unvote",
+            "comment",
+            entity_id=comment_id,
+            course_id=request_params.get("course_id", ""),
+            data=request_params,
+        )
         try:
-            user_id = request.query_params.get("user_id", "")
+            user_id = request_params.get("user_id", "")
             comment_response = delete_comment_vote(comment_id, user_id)
         except (ForumV2RequestError, KeyError) as e:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(e),
+            )
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        set_forum_comment_context(comment_response)
+        set_forum_trace_outcome(status.HTTP_200_OK)
         return Response(comment_response, status=status.HTTP_200_OK)

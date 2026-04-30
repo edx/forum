@@ -15,6 +15,14 @@ from forum.api import (
     update_comment,
 )
 from forum.utils import ForumV2RequestError, str_to_bool
+from forum.views.telemetry import (
+    forum_error_type,
+    set_custom_attribute,
+    set_forum_comment_context,
+    set_forum_trace_context,
+    set_forum_trace_outcome,
+    set_forum_update_fields,
+)
 
 
 class CommentsAPIView(APIView):
@@ -38,13 +46,20 @@ class CommentsAPIView(APIView):
         Response:
             The details of the comment for the given comment_id.
         """
+        set_forum_trace_context(request, "comment.get", "comment", entity_id=comment_id)
         try:
             data = get_parent_comment(comment_id)
-        except ForumV2RequestError:
+        except ForumV2RequestError as error:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(error),
+            )
             return Response(
                 {"error": f"Comment does not exist with Id: {comment_id}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        set_forum_comment_context(data)
+        set_forum_trace_outcome(status.HTTP_200_OK)
         return Response(data, status=status.HTTP_200_OK)
 
     def post(self, request: Request, comment_id: str) -> Response:
@@ -65,8 +80,16 @@ class CommentsAPIView(APIView):
         Response:
             The details of the comment that is created.
         """
+        request_data = request.data
+        set_forum_trace_context(
+            request,
+            "comment.create_child",
+            "comment",
+            entity_id=comment_id,
+            data=request_data,
+        )
+        set_custom_attribute("forum.parent_comment_id", str(comment_id))
         try:
-            request_data = request.data
             comment = create_child_comment(
                 comment_id,
                 request_data["body"],
@@ -75,16 +98,26 @@ class CommentsAPIView(APIView):
                 str_to_bool(request_data.get("anonymous", False)),
                 str_to_bool(request_data.get("anonymous_to_peers", False)),
             )
-        except ForumV2RequestError:
+        except ForumV2RequestError as error:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(error),
+            )
             return Response(
                 {"error": f"Comment does not exist with Id: {comment_id}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except ValidationError as e:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(e),
+            )
             return Response(
                 {"error": e.detail},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        set_forum_comment_context(comment)
+        set_forum_trace_outcome(status.HTTP_200_OK)
         return Response(comment, status=status.HTTP_200_OK)
 
     def put(self, request: Request, comment_id: str) -> Response:
@@ -99,8 +132,16 @@ class CommentsAPIView(APIView):
         Response:
             The details of the comment that is updated.
         """
+        request_data = request.data
+        set_forum_trace_context(
+            request,
+            "comment.update",
+            "comment",
+            entity_id=comment_id,
+            data=request_data,
+        )
+        set_forum_update_fields(request_data)
         try:
-            request_data = request.data
             if anonymous := request_data.get("anonymous"):
                 anonymous = str_to_bool(anonymous)
             if anonymous_to_peers := request_data.get("anonymous_to_peers"):
@@ -122,16 +163,26 @@ class CommentsAPIView(APIView):
                 request_data.get("edit_reason_code"),
                 request_data.get("endorsement_user_id"),
             )
-        except ForumV2RequestError:
+        except ForumV2RequestError as error:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(error),
+            )
             return Response(
                 {"error": f"Comment does not exist with Id: {comment_id}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except ValidationError as e:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(e),
+            )
             return Response(
                 {"error": e.detail},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        set_forum_comment_context(comment)
+        set_forum_trace_outcome(status.HTTP_200_OK)
         return Response(comment, status=status.HTTP_200_OK)
 
     def delete(self, request: Request, comment_id: str) -> Response:
@@ -146,13 +197,26 @@ class CommentsAPIView(APIView):
         Response:
             The details of the comment that is deleted.
         """
+        set_forum_trace_context(
+            request,
+            "comment.delete",
+            "comment",
+            entity_id=comment_id,
+        )
         try:
             deleted_comment = delete_comment(comment_id)
-        except ForumV2RequestError:
+        except ForumV2RequestError as error:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(error),
+            )
             return Response(
                 {"error": f"Comment does not exist with Id: {comment_id}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        set_forum_comment_context(deleted_comment)
+        set_custom_attribute("forum.delete_mode", "soft")
+        set_forum_trace_outcome(status.HTTP_200_OK)
         return Response(deleted_comment, status=status.HTTP_200_OK)
 
 
@@ -179,8 +243,15 @@ class CreateThreadCommentAPIView(APIView):
         Response:
             The details of the comment that is created.
         """
+        request_data = request.data
+        set_forum_trace_context(
+            request,
+            "comment.create_parent",
+            "comment",
+            entity_id=thread_id,
+            data=request_data,
+        )
         try:
-            request_data = request.data
             comment = create_parent_comment(
                 thread_id,
                 request_data["body"],
@@ -189,19 +260,33 @@ class CreateThreadCommentAPIView(APIView):
                 str_to_bool(request_data.get("anonymous", False)),
                 str_to_bool(request_data.get("anonymous_to_peers", False)),
             )
-        except ForumV2RequestError:
+        except ForumV2RequestError as error:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(error),
+            )
             return Response(
                 {"error": f"Thread does not exist with Id: {thread_id}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except ValueError as e:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(e),
+            )
             return Response(
                 {"error": e},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except ValidationError as e:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(e),
+            )
             return Response(
                 {"error": e.detail},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        set_forum_comment_context(comment)
+        set_forum_trace_outcome(status.HTTP_200_OK)
         return Response(comment, status=status.HTTP_200_OK)
