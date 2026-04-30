@@ -14,6 +14,12 @@ from forum.api.votes import (
     update_thread_votes,
 )
 from forum.utils import ForumV2RequestError
+from forum.views.telemetry import (
+    forum_error_type,
+    set_forum_thread_context,
+    set_forum_trace_context,
+    set_forum_trace_outcome,
+)
 
 
 class ThreadVoteView(APIView):
@@ -52,13 +58,27 @@ class ThreadVoteView(APIView):
         Returns:
             Response: The HTTP response with the result of the vote operation.
         """
+        request_data = request.data
+        set_forum_trace_context(
+            request,
+            "thread.vote",
+            "thread",
+            entity_id=thread_id,
+            data=request_data,
+        )
         try:
             thread_response = update_thread_votes(
-                thread_id, request.data["user_id"], request.data["value"]
+                thread_id, request_data["user_id"], request_data["value"]
             )
         except (ForumV2RequestError, KeyError) as e:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(e),
+            )
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        set_forum_thread_context(thread_response)
+        set_forum_trace_outcome(status.HTTP_200_OK)
         return Response(thread_response, status=status.HTTP_200_OK)
 
     def delete(self, request: Request, thread_id: str) -> Response:
@@ -72,12 +92,27 @@ class ThreadVoteView(APIView):
         Returns:
             Response: The HTTP response with the result of the remove vote operation.
         """
+        request_params = request.query_params.dict()
+        set_forum_trace_context(
+            request,
+            "thread.unvote",
+            "thread",
+            entity_id=thread_id,
+            course_id=request_params.get("course_id", ""),
+            data=request_params,
+        )
         try:
-            user_id = request.query_params.get("user_id", "")
+            user_id = request_params.get("user_id", "")
             thread_response = delete_thread_vote(thread_id, user_id)
         except (ForumV2RequestError, KeyError) as e:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(e),
+            )
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        set_forum_thread_context(thread_response)
+        set_forum_trace_outcome(status.HTTP_200_OK)
         return Response(thread_response, status=status.HTTP_200_OK)
 
 

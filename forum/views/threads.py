@@ -17,6 +17,14 @@ from forum.api.threads import (
     update_thread,
 )
 from forum.utils import ForumV2RequestError, str_to_bool
+from forum.views.telemetry import (
+    forum_error_type,
+    set_custom_attribute,
+    set_forum_thread_context,
+    set_forum_trace_context,
+    set_forum_trace_outcome,
+    set_forum_update_fields,
+)
 
 log = logging.getLogger(__name__)
 
@@ -42,14 +50,28 @@ class ThreadsAPIView(APIView):
         Returns:
             Response: A Response object containing the serialized thread data or an error message.
         """
+        params = request.query_params.dict()
+        set_forum_trace_context(
+            request,
+            "thread.get",
+            "thread",
+            entity_id=thread_id,
+            course_id=params.get("course_id", ""),
+            data=params,
+        )
         try:
-            params = request.query_params.dict()
             data = get_thread(thread_id, params)
         except ForumV2RequestError as error:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(error),
+            )
             return Response(
                 {"error": str(error)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        set_forum_thread_context(data)
+        set_forum_trace_outcome(status.HTTP_200_OK)
         return Response(data, status=status.HTTP_200_OK)
 
     def delete(self, request: Request, thread_id: str) -> Response:
@@ -64,14 +86,22 @@ class ThreadsAPIView(APIView):
         Response:
             The details of the thread that is deleted.
         """
+        set_forum_trace_context(request, "thread.delete", "thread", entity_id=thread_id)
         try:
             serialized_data = delete_thread(thread_id)
-            return Response(serialized_data, status=status.HTTP_200_OK)
         except ForumV2RequestError as error:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(error),
+            )
             return Response(
                 {"error": str(error)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        set_forum_thread_context(serialized_data)
+        set_custom_attribute("forum.delete_mode", "soft")
+        set_forum_trace_outcome(status.HTTP_200_OK)
+        return Response(serialized_data, status=status.HTTP_200_OK)
 
     def put(self, request: Request, thread_id: str) -> Response:
         """
@@ -86,14 +116,29 @@ class ThreadsAPIView(APIView):
             The details of the thread that is updated.
         """
 
+        request_data = request.data
+        set_forum_trace_context(
+            request,
+            "thread.update",
+            "thread",
+            entity_id=thread_id,
+            data=request_data,
+        )
+        set_forum_update_fields(request_data)
         try:
-            serialized_data = update_thread(thread_id, **request.data)
-            return Response(serialized_data, status=status.HTTP_200_OK)
+            serialized_data = update_thread(thread_id, **request_data)
         except ForumV2RequestError as error:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(error),
+            )
             return Response(
                 {"error": str(error)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        set_forum_thread_context(serialized_data)
+        set_forum_trace_outcome(status.HTTP_200_OK)
+        return Response(serialized_data, status=status.HTTP_200_OK)
 
 
 class CreateThreadAPIView(APIView):
@@ -118,19 +163,31 @@ class CreateThreadAPIView(APIView):
             The details of the thread that is created.
         """
 
+        params = request.data
+        set_forum_trace_context(
+            request,
+            "thread.create",
+            "thread",
+            data=params,
+        )
         try:
-            params = request.data
             if params.get("anonymous"):
                 params["anonymous"] = str_to_bool(params["anonymous"])
             if params.get("anonymous_to_peers"):
                 params["anonymous_to_peers"] = str_to_bool(params["anonymous_to_peers"])
             serialized_data = create_thread(**params)
-            return Response(serialized_data, status=status.HTTP_200_OK)
         except (TypeError, ForumV2RequestError) as error:
+            set_forum_trace_outcome(
+                status.HTTP_400_BAD_REQUEST,
+                forum_error_type(error),
+            )
             return Response(
                 {"error": str(error)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        set_forum_thread_context(serialized_data)
+        set_forum_trace_outcome(status.HTTP_200_OK)
+        return Response(serialized_data, status=status.HTTP_200_OK)
 
 
 class UserThreadsAPIView(APIView):
