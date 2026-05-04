@@ -122,7 +122,8 @@ def prepare_thread_api_response(
                     "merge_question_type_responses",
                 ]
                 for param in params:
-                    if value := data_or_params.get(param):
+                    value = data_or_params.get(param)
+                    if value is not None:
                         context[param] = str_to_bool(value)
                 if user_id and backend.get_user(user_id):
                     mark_thread_as_read(user_id, thread["_id"], course_id=course_id)
