@@ -146,7 +146,7 @@ def create_or_update_thread(thread_data: dict[str, Any]) -> None:
             anonymous=thread_data.get("anonymous", False),
             anonymous_to_peers=thread_data.get("anonymous_to_peers", False),
             closed=thread_data.get("closed", False),
-            pinned=thread_data.get("pinned"),
+            pinned=thread_data.get("pinned", False),
             created_at=parse_mongo_datetime(thread_data["created_at"]),
             updated_at=parse_mongo_datetime(thread_data["updated_at"]),
             last_activity_at=parse_mongo_datetime(thread_data["last_activity_at"]),
@@ -178,7 +178,7 @@ def create_or_update_thread(thread_data: dict[str, Any]) -> None:
         thread.anonymous = thread_data.get("anonymous", False)
         thread.anonymous_to_peers = thread_data.get("anonymous_to_peers", False)
         thread.closed = thread_data.get("closed", False)
-        thread.pinned = thread_data.get("pinned")
+        thread.pinned = thread_data.get("pinned", False)
         thread.updated_at = parse_mongo_datetime(thread_data["updated_at"])  # type: ignore[assignment]
         thread.last_activity_at = parse_mongo_datetime(thread_data["last_activity_at"])
         thread.commentable_id = thread_data.get("commentable_id")  # type: ignore[assignment]
