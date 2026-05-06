@@ -2284,6 +2284,7 @@ class MySQLBackend(AbstractBackend):
             commentable_id=data.get("commentable_id", "course"),
             thread_type=data.get("thread_type", "discussion"),
             context=data.get("context", "course"),
+            pinned=False,
             last_activity_at=timezone.now(),
             **optional_args,
         )
