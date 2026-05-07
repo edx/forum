@@ -571,7 +571,8 @@ class MySQLBackend(AbstractBackend):
             whether the thread is read and the unread comment count.
         """
         read_states: dict[str, list[Any]] = {}
-        if user_id == "":
+        # Return empty if no user_id - can't calculate read state without a user
+        if user_id == "" or user_id is None:
             return read_states
         try:
             user = User.objects.get(pk=user_id)
@@ -600,7 +601,6 @@ class MySQLBackend(AbstractBackend):
                 .count()
             )
             read_states[str(thread.pk)] = [is_read, unread_comment_count]
-
         return read_states
 
     @staticmethod
