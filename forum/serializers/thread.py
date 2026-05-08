@@ -126,9 +126,10 @@ class ThreadSerializer(ContentSerializer):
             if not user_id:
                 return None
             course_id = obj["course_id"]
-            thread_key = obj["_id"]
+            # Convert _id to string for consistent lookup (MongoDB returns string keys)
+            thread_key = str(obj["_id"])
             is_read, _ = self.backend.get_read_states(
-                [obj["_id"]], user_id, course_id
+                [thread_key], user_id, course_id
             ).get(thread_key, (False, obj["comment_count"]))
             return is_read
         return None
@@ -150,9 +151,10 @@ class ThreadSerializer(ContentSerializer):
             if not user_id:
                 return None
             course_id = obj["course_id"]
-            thread_key = obj["_id"]
+            # Convert _id to string for consistent lookup (MongoDB returns string keys)
+            thread_key = str(obj["_id"])
             _, unread_count = self.backend.get_read_states(
-                [obj["_id"]], user_id, course_id
+                [thread_key], user_id, course_id
             ).get(thread_key, (False, obj["comment_count"]))
             return unread_count
         return None
