@@ -556,38 +556,39 @@ class MongoBackend(AbstractBackend):
         threads = CommentThread().find(
             {"_id": {"$in": [ObjectId(thread_id) for thread_id in thread_ids]}}
         )
-        read_states = {}
-        if user_id:
-            user = Users().find_one(
-                {"_id": user_id, "read_states.course_id": course_id}
-            )
-            if not user:
-                return {}
+        read_states: dict[str, list[Any]] = {}
+        # Return empty if no user_id - can't calculate read state without a user
+        if not user_id or user_id is None:
+            return read_states
 
-            read_state = next(
-                (
-                    rs
-                    for rs in user.get("read_states", [])
-                    if rs.get("course_id") == course_id
-                ),
-                None,
-            )
-            if read_state:
-                read_dates = read_state.get("last_read_times", {})
-                for thread in threads:
-                    thread_key = str(thread["_id"])
-                    if thread_key in read_dates:
-                        read_date = make_aware(read_dates[thread_key])
-                        last_activity_at = make_aware(thread["last_activity_at"])
-                        is_read = read_date >= last_activity_at
-                        unread_comment_count = Contents().count_documents(
-                            {
-                                "comment_thread_id": ObjectId(thread_key),
-                                "created_at": {"$gte": read_dates[thread_key]},
-                                "author_id": {"$ne": str(user_id)},
-                            }
-                        )
-                        read_states[thread_key] = [is_read, unread_comment_count]
+        user = Users().find_one({"_id": user_id, "read_states.course_id": course_id})
+        if not user:
+            return {}
+
+        read_state = next(
+            (
+                rs
+                for rs in user.get("read_states", [])
+                if rs.get("course_id") == course_id
+            ),
+            None,
+        )
+        if read_state:
+            read_dates = read_state.get("last_read_times", {})
+            for thread in threads:
+                thread_key = str(thread["_id"])
+                if thread_key in read_dates:
+                    read_date = make_aware(read_dates[thread_key])
+                    last_activity_at = make_aware(thread["last_activity_at"])
+                    is_read = read_date >= last_activity_at
+                    unread_comment_count = Contents().count_documents(
+                        {
+                            "comment_thread_id": ObjectId(thread_key),
+                            "created_at": {"$gte": read_dates[thread_key]},
+                            "author_id": {"$ne": str(user_id)},
+                        }
+                    )
+                    read_states[thread_key] = [is_read, unread_comment_count]
 
         return read_states
 
@@ -852,15 +853,21 @@ class MongoBackend(AbstractBackend):
         if not thread:
             raise ValueError("Thread does not exist.")
 
-        return {
+        result = {
             "id": str(thread["_id"]),
             **thread,
             "type": "thread",
-            "read": is_read,
-            "unread_comments_count": unread_count,
             "endorsed": is_endorsed,
             "abuse_flagged_count": abuse_flagged_count,
         }
+
+        # Only add read state fields if we have valid values (not None)
+        if is_read is not None:
+            result["read"] = is_read
+        if unread_count is not None:
+            result["unread_comments_count"] = unread_count
+
+        return result
 
     @classmethod
     def threads_presentor(
@@ -897,9 +904,13 @@ class MongoBackend(AbstractBackend):
             thread = threads_dict.get(thread_id)
             if thread:
                 thread_key = thread_id
-                is_read, unread_count = read_states.get(
-                    thread_key, (False, thread["comment_count"])
-                )
+                # Only get read state if it exists (user_id was provided)
+                read_state_tuple = read_states.get(thread_key)
+                if read_state_tuple:
+                    is_read, unread_count = read_state_tuple
+                else:
+                    # No read state available (user_id was None), use None instead of False
+                    is_read, unread_count = None, None
                 is_endorsed = threads_endorsed.get(thread_key, False)
                 abuse_flagged_count = threads_flagged.get(thread_key, 0)
                 presenters.append(
