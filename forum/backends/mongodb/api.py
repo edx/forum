@@ -1250,9 +1250,18 @@ class MongoBackend(AbstractBackend):
 
     @staticmethod
     def get_commentables_counts_based_on_type(course_id: str) -> dict[str, Any]:
-        """Return commentables counts in a course based on thread's type."""
+        """Return commentables counts in a course based on thread's type.
+
+        Only counts non-deleted threads to match visible posts.
+        """
         pipeline: list[dict[str, Any]] = [
-            {"$match": {"course_id": course_id, "_type": "CommentThread"}},
+            {
+                "$match": {
+                    "course_id": course_id,
+                    "_type": "CommentThread",
+                    "is_deleted": {"$ne": True},  # Exclude deleted threads
+                }
+            },
             {
                 "$group": {
                     "_id": {"topic_id": "$commentable_id", "type": "$thread_type"},
