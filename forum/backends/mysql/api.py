@@ -2021,8 +2021,7 @@ class MySQLBackend(AbstractBackend):
         """
         result = (
             CommentThread.objects.filter(
-                course_id=course_id,
-                is_deleted=False  # Exclude deleted threads
+                course_id=course_id, is_deleted=False  # Exclude deleted threads
             )
             .values("commentable_id")
             .annotate(
