@@ -2015,9 +2015,14 @@ class MySQLBackend(AbstractBackend):
 
     @staticmethod
     def get_commentables_counts_based_on_type(course_id: str) -> dict[str, Any]:
-        """Return commentables counts in a course based on thread's type."""
+        """Return commentables counts in a course based on thread's type.
+
+        Only counts non-deleted threads to match visible posts.
+        """
         result = (
-            CommentThread.objects.filter(course_id=course_id)
+            CommentThread.objects.filter(
+                course_id=course_id, is_deleted=False  # Exclude deleted threads
+            )
             .values("commentable_id")
             .annotate(
                 discussion_count=Count(
