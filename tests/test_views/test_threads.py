@@ -388,7 +388,7 @@ def test_filter_by_author(api_client: APIClient, patched_get_backend: Any) -> No
 
 
 def test_anonymous_threads(api_client: APIClient, patched_get_backend: Any) -> None:
-    """Test Anonymus threads are only visible to Authors"""
+    """Test Anonymous threads are excluded from both own posts and other users' posts"""
     backend = patched_get_backend
     course_id = "course-1"
     author_id = "1"
@@ -431,7 +431,8 @@ def test_anonymous_threads(api_client: APIClient, patched_get_backend: Any) -> N
     response = api_client.get_json("/api/v2/threads", params)
     assert response.status_code == 200
     result = response.json()["collection"]
-    assert len(result) == 2
+    # Anonymous threads are now excluded from "My Posts" tab as well
+    assert len(result) == 1
 
 
 def test_unresponded_filter(api_client: APIClient, patched_get_backend: Any) -> None:
