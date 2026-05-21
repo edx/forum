@@ -1259,10 +1259,28 @@ class MySQLBackend(AbstractBackend):
             raise ValueError("Invalid vote type")
 
         vote_value = 1 if vote == "up" else -1
-        voted_ids = UserVote.objects.filter(
-            user__pk=user_id, vote=vote_value
-        ).values_list("content_object_id", flat=True)
-        return list(voted_ids)
+        voted_query = UserVote.objects.filter(user__pk=user_id, vote=vote_value)
+
+        if course_id:
+            thread_content_type = ContentType.objects.get_for_model(CommentThread)
+            comment_content_type = ContentType.objects.get_for_model(Comment)
+
+            thread_ids = CommentThread.objects.filter(course_id=course_id).values_list(
+                "pk", flat=True
+            )
+
+            comment_ids = Comment.objects.filter(course_id=course_id).values_list(
+                "pk", flat=True
+            )
+
+            voted_query = voted_query.filter(
+                Q(content_type=thread_content_type, content_object_id__in=thread_ids)
+                | Q(
+                    content_type=comment_content_type, content_object_id__in=comment_ids
+                )
+            )
+
+        return list(voted_query.values_list("content_object_id", flat=True))
 
     @staticmethod
     def filter_standalone_threads(comment_ids: list[str]) -> list[str]:
@@ -1289,10 +1307,12 @@ class MySQLBackend(AbstractBackend):
         hash_data["external_id"] = forum_user.user.pk
         hash_data["id"] = forum_user.user.pk
 
+        course_id = params.get("course_id") or None
+
         if params.get("complete"):
             subscribed_thread_ids = cls.find_subscribed_threads(user_id)
-            upvoted_ids = cls.get_user_voted_ids(user_id, "up")
-            downvoted_ids = cls.get_user_voted_ids(user_id, "down")
+            upvoted_ids = cls.get_user_voted_ids(user_id, "up", course_id)
+            downvoted_ids = cls.get_user_voted_ids(user_id, "down", course_id)
             hash_data.update(
                 {
                     "subscribed_thread_ids": subscribed_thread_ids,
