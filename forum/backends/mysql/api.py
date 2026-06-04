@@ -1482,14 +1482,10 @@ class MySQLBackend(AbstractBackend):
         threads = CommentThread.objects.filter(
             author=author,
             course_id=course_id,
-            anonymous_to_peers=False,
-            anonymous=False,
         )
         comments = Comment.objects.filter(
             author=author,
             course_id=course_id,
-            anonymous_to_peers=False,
-            anonymous=False,
         )
 
         responses = comments.filter(parent__isnull=True)
@@ -1569,16 +1565,8 @@ class MySQLBackend(AbstractBackend):
     @classmethod
     def update_all_users_in_course(cls, course_id: str) -> list[str]:
         """Update all user stats in a course."""
-        course_comments = Comment.objects.filter(
-            anonymous=False,
-            anonymous_to_peers=False,
-            course_id=course_id,
-        )
-        course_threads = CommentThread.objects.filter(
-            anonymous=False,
-            anonymous_to_peers=False,
-            course_id=course_id,
-        )
+        course_comments = Comment.objects.filter(course_id=course_id)
+        course_threads = CommentThread.objects.filter(course_id=course_id)
 
         comment_authors = set(course_comments.values_list("author__id", flat=True))
         thread_authors = set(course_threads.values_list("author__id", flat=True))
@@ -1775,7 +1763,6 @@ class MySQLBackend(AbstractBackend):
             author_id = str(comment.author.pk)
             course_id = comment.course_id
             is_reply = comment.parent is not None
-            is_anonymous = comment.anonymous or comment.anonymous_to_peers
 
             # Restore the comment
             comment.is_deleted = False
@@ -1783,28 +1770,27 @@ class MySQLBackend(AbstractBackend):
             comment.deleted_by = None  # type: ignore[assignment]
             comment.save()
 
-            # Update user course stats (only if not anonymous)
-            if not is_anonymous:
-                if is_reply:
-                    # This is a reply - increment replies, decrement deleted_replies
-                    cls.update_stats_for_course(
-                        author_id, course_id, replies=1, deleted_replies=-1
-                    )
-                else:
-                    # This is a response - increment responses, decrement deleted_responses
-                    # Count ONLY children that are STILL DELETED (not already restored separately)
-                    deleted_child_count = Comment.objects.filter(
-                        parent=comment, is_deleted=True
-                    ).count()
+            # Update user course stats
+            if is_reply:
+                # This is a reply - increment replies, decrement deleted_replies
+                cls.update_stats_for_course(
+                    author_id, course_id, replies=1, deleted_replies=-1
+                )
+            else:
+                # This is a response - increment responses, decrement deleted_responses
+                # Count ONLY children that are STILL DELETED (not already restored separately)
+                deleted_child_count = Comment.objects.filter(
+                    parent=comment, is_deleted=True
+                ).count()
 
-                    cls.update_stats_for_course(
-                        author_id,
-                        course_id,
-                        responses=1,
-                        deleted_responses=-1,
-                        replies=deleted_child_count,
-                        deleted_replies=-deleted_child_count,
-                    )
+                cls.update_stats_for_course(
+                    author_id,
+                    course_id,
+                    responses=1,
+                    deleted_responses=-1,
+                    replies=deleted_child_count,
+                    deleted_replies=-deleted_child_count,
+                )
 
             return True
         except ObjectDoesNotExist:
@@ -1823,7 +1809,6 @@ class MySQLBackend(AbstractBackend):
             # Get thread metadata before restoring
             author_id = str(thread.author.pk)
             course_id = thread.course_id
-            is_anonymous = thread.anonymous or thread.anonymous_to_peers
 
             # Restore the thread
             thread.is_deleted = False
@@ -1831,11 +1816,10 @@ class MySQLBackend(AbstractBackend):
             thread.deleted_by = None  # type: ignore[assignment]
             thread.save()
 
-            # Update user course stats (only if not anonymous)
-            if not is_anonymous:
-                cls.update_stats_for_course(
-                    author_id, course_id, threads=1, deleted_threads=-1
-                )
+            # Update user course stats
+            cls.update_stats_for_course(
+                author_id, course_id, threads=1, deleted_threads=-1
+            )
 
             return True
         except ObjectDoesNotExist:

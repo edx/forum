@@ -221,7 +221,8 @@ def delete_thread(
 
     backend.delete_subscriptions_of_a_thread(thread_id)
     result = backend.soft_delete_thread(thread_id, deleted_by)
-    if result and not (thread["anonymous"] or thread["anonymous_to_peers"]):
+    is_anonymous = thread["anonymous"] or thread["anonymous_to_peers"]
+    if result and not (_backend_name(backend) == "mongodb" and is_anonymous):
         backend.update_stats_for_course(
             thread["author_id"],
             thread["course_id"],
@@ -376,14 +377,20 @@ def create_thread(
     except Exception as e:  # pylint: disable=broad-except
         log.error(f"AI moderation failed for thread {thread_id}: {e}")
 
-    if not (anonymous or anonymous_to_peers):
+    if thread is None:
+        raise ForumV2RequestError(
+            f"Failed to retrieve thread after creation: {thread_id}"
+        )
+
+    is_anonymous = anonymous or anonymous_to_peers
+    if not (_backend_name(backend) == "mongodb" and is_anonymous):
         backend.update_stats_for_course(
-            thread["author_id"], thread["course_id"], threads=1  # type: ignore[index]
+            thread["author_id"], thread["course_id"], threads=1
         )
 
     try:
         return prepare_thread_api_response(
-            thread,  # type: ignore[arg-type]
+            thread,
             backend,
             True,
             data,

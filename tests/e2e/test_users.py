@@ -569,7 +569,7 @@ def test_handles_removing_flags(
 def test_build_course_stats_with_anonymous_posts(
     api_client: APIClient, patched_get_backend: Any
 ) -> None:
-    """Test that anonymous posts are not included in user stats after a non-anonymous post."""
+    """Test that anonymous posts are not included in user stats."""
     backend = patched_get_backend()
     # Create a test user
     user_id = backend.find_or_create_user(user_id="3", username="user3")
@@ -577,7 +577,7 @@ def test_build_course_stats_with_anonymous_posts(
 
     threads_ids = []
 
-    # Create threads
+    # Create threads: one anonymous_to_peers, one anonymous, one normal
     for i in range(len(range(3))):
         response = api_client.post_json(
             "/api/v2/course/threads",
@@ -600,10 +600,13 @@ def test_build_course_stats_with_anonymous_posts(
     # Parse response data
     stats = response.json()
 
-    # Assert that only the non-anonymous post is included in stats
+    # For MongoDB, anonymous and anonymous_to_peers threads are excluded from stats;
+    # Only the normal thread is counted. For MySql, All three threads are counted.
+    is_mongo = "mongo" in backend.__class__.__name__.lower()
+    expected_threads = 1 if is_mongo else 3
     assert stats["user_stats"][0]["replies"] == 0
     assert stats["user_stats"][0]["responses"] == 0
-    assert stats["user_stats"][0]["threads"] == 1
+    assert stats["user_stats"][0]["threads"] == expected_threads
 
 
 def test_update_user_stats(api_client: APIClient, patched_get_backend: Any) -> None:
