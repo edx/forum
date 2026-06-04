@@ -6,6 +6,7 @@ from unittest.mock import Mock, MagicMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 
 from forum.ai_moderation import AIModerationService, moderate_and_flag_spam
 from forum.backends.mysql.models import ModerationAuditLog
@@ -47,6 +48,8 @@ def mock_ai_moderation_settings() -> Any:
         mock_settings.AI_MODERATION_API_URL = "http://test-api.example.com"
         mock_settings.AI_MODERATION_API_KEY = "test-api-key"
         mock_settings.AI_MODERATION_USER_ID = "999"
+        mock_settings.AI_MODERATION_FLAGGED_CACHE_TTL = 60 * 60
+        mock_settings.AI_MODERATION_FLAGGED_CACHE_PREFIX = "ai_moderation:flagged:v1"
         yield mock_settings
 
 
@@ -281,6 +284,51 @@ class TestAIModerationAutoDelete:  # pylint: disable=redefined-outer-name,unused
             assert "flagged" in result["actions_taken"]
             assert "soft_deleted" in result["actions_taken"]
             assert len(result["actions_taken"]) == 2
+
+
+class TestAIModerationCaching:  # pylint: disable=redefined-outer-name,unused-argument
+    """Tests for caching of flagged moderation results."""
+
+    def test_flagged_result_is_cached_and_reused(
+        self,
+        ai_service: AIModerationService,
+        mock_waffle_flags: dict[str, Mock],
+        sample_thread_content: dict[str, Any],
+    ) -> None:
+        cache.clear()
+        mock_waffle_flags["auto_delete"].return_value = False
+
+        # Mock API response indicating spam
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                "content": '{"classification": "spam", "reasoning": "Spam detected", "confidence_score": 0.9}'
+            }
+        ]
+
+        backend = Mock()
+
+        with patch("requests.post", return_value=mock_response) as mock_post:
+            # First call should hit XPert and then cache
+            first = ai_service.moderate_and_flag_content(
+                "spam content",
+                sample_thread_content,
+                course_id="course-v1:edX+DemoX+Demo",
+                backend=backend,
+            )
+            assert first["is_spam"] is True
+            assert mock_post.call_count == 1
+
+            # Second call with identical content should use cached result
+            second = ai_service.moderate_and_flag_content(
+                "spam content",
+                sample_thread_content,
+                course_id="course-v1:edX+DemoX+Demo",
+                backend=backend,
+            )
+            assert second["is_spam"] is True
+            assert mock_post.call_count == 1
 
 
 class TestAIModerationErrorHandling:  # pylint: disable=redefined-outer-name,unused-argument

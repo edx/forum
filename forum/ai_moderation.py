@@ -4,11 +4,13 @@ AI Moderation utilities for forum content.
 
 import json
 import logging
+import hashlib
 from typing import Dict, Optional, Any
 
 import requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 from opaque_keys.edx.keys import CourseKey
@@ -118,6 +120,40 @@ class AIModerationService:
             settings, "AI_MODERATION_READ_TIMEOUT", 30
         )  # seconds
         self.ai_moderation_user_id = getattr(settings, "AI_MODERATION_USER_ID", None)
+        self.flagged_cache_ttl = getattr(
+            settings, "AI_MODERATION_FLAGGED_CACHE_TTL", 60 * 60 * 24
+        )
+        self.flagged_cache_prefix = getattr(
+            settings, "AI_MODERATION_FLAGGED_CACHE_PREFIX", "ai_moderation:flagged:v1"
+        )
+
+    def _cache_key_for_content(self, content: str) -> str:
+        """Return the cache key for a given message content."""
+        normalized = (content or "").strip()
+        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        return f"{self.flagged_cache_prefix}:{digest}"
+
+    def _get_cached_flagged_result(self, content: str) -> Optional[Dict[str, Any]]:
+        """Return cached moderation result for flagged content, if present."""
+        try:
+            cached = cache.get(self._cache_key_for_content(content))
+        except Exception:  # pylint: disable=broad-except, no-else-return
+            log.exception("AI moderation cache read failed")
+            return None
+        return cached if isinstance(cached, dict) else None
+
+    def _set_cached_flagged_result(
+        self, content: str, moderation_result: Dict[str, Any]
+    ) -> None:
+        """Store moderation result for flagged content in cache."""
+        try:
+            cache.set(
+                self._cache_key_for_content(content),
+                moderation_result,
+                timeout=self.flagged_cache_ttl,
+            )
+        except Exception:  # pylint: disable=broad-except
+            log.exception("AI moderation cache write failed")
 
     def _make_api_request(self, content: str) -> Optional[Dict[str, Any]]:
         """
@@ -228,8 +264,10 @@ class AIModerationService:
         if not is_ai_moderation_enabled(course_key):  # type: ignore[no-untyped-call]
             return result
 
-        # Make API request
-        moderation_result = self._make_api_request(content)
+        # If we've already flagged this exact content before, reuse the cached result
+        moderation_result = self._get_cached_flagged_result(content)
+        if moderation_result is None:
+            moderation_result = self._make_api_request(content)
 
         if moderation_result is None:
             result["reasoning"] = "AI moderation API failed"
@@ -239,6 +277,10 @@ class AIModerationService:
         classification = moderation_result.get("classification", "not_spam")
         reasoning = moderation_result.get("reasoning", "No reasoning provided")
         is_spam = classification in ["spam", "spam_or_scam"]
+
+        # Cache only flagged (spam) results to avoid repeated XPert calls
+        if is_spam:
+            self._set_cached_flagged_result(content, moderation_result)
 
         result.update(
             {
