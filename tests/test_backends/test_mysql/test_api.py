@@ -769,7 +769,6 @@ def test_delete_user_comments_with_deleted_by() -> None:
     assert comment.deleted_by == admin
 
 
-
 @pytest.mark.django_db
 def test_build_course_stats_includes_anonymous_thread() -> None:
     """build_course_stats should count anonymous threads in activity stats."""
