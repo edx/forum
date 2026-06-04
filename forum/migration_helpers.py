@@ -1,8 +1,8 @@
 """Migration commands helper methods."""
 
-from typing import Any
 import logging
 from datetime import datetime
+from typing import Any
 
 from django.contrib.auth.models import User  # pylint: disable=E5142
 from django.core.management.base import OutputWrapper
@@ -24,8 +24,7 @@ from forum.models import (
     Subscription,
     UserVote,
 )
-from forum.utils import make_aware, get_trunc_title
-
+from forum.utils import get_trunc_title, make_aware
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +104,23 @@ def migrate_content(db: Database[dict[str, Any]], course_id: str) -> None:
         migrate_subscriptions(db, content["_id"])
 
 
+def _resolve_thread_actors(
+    thread_data: dict[str, Any],
+) -> tuple["User | None", "User | None"]:
+    """Return (deleted_by, closed_by) users resolved from thread_data."""
+    deleted_by = (
+        get_user_or_none(thread_data["deleted_by"])
+        if thread_data.get("deleted_by")
+        else None
+    )
+    closed_by = (
+        get_user_or_none(thread_data["closed_by_id"])
+        if thread_data.get("closed_by_id")
+        else None
+    )
+    return deleted_by, closed_by
+
+
 def create_or_update_thread(thread_data: dict[str, Any]) -> None:
     """Create or update a thread."""
     author = get_user_or_none(thread_data["author_id"])
@@ -129,10 +145,7 @@ def create_or_update_thread(thread_data: dict[str, Any]) -> None:
         mongo_id=mongo_thread_id,
     )
     if not mongo_content.content_object_id:
-        # Get deleted_by user if deleted_by field exists in MongoDB
-        deleted_by = None
-        if thread_data.get("deleted_by"):
-            deleted_by = get_user_or_none(thread_data["deleted_by"])
+        deleted_by, closed_by = _resolve_thread_actors(thread_data)
 
         thread = CommentThread.objects.create(
             author=author,
@@ -146,6 +159,8 @@ def create_or_update_thread(thread_data: dict[str, Any]) -> None:
             anonymous=thread_data.get("anonymous", False),
             anonymous_to_peers=thread_data.get("anonymous_to_peers", False),
             closed=thread_data.get("closed", False),
+            closed_by=closed_by,
+            close_reason_code=thread_data.get("close_reason_code"),
             pinned=thread_data.get("pinned", False),
             created_at=parse_mongo_datetime(thread_data["created_at"]),
             updated_at=parse_mongo_datetime(thread_data["updated_at"]),
@@ -165,10 +180,7 @@ def create_or_update_thread(thread_data: dict[str, Any]) -> None:
         # Update existing thread with latest data from MongoDB
         thread = CommentThread.objects.get(pk=mongo_content.content_object_id)
 
-        # Get deleted_by user if needed
-        deleted_by = None
-        if thread_data.get("deleted_by"):
-            deleted_by = get_user_or_none(thread_data["deleted_by"])
+        deleted_by, closed_by = _resolve_thread_actors(thread_data)
 
         # Update all fields that might have changed
         thread.title = get_trunc_title(thread_data.get("title", ""))
@@ -178,6 +190,8 @@ def create_or_update_thread(thread_data: dict[str, Any]) -> None:
         thread.anonymous = thread_data.get("anonymous", False)
         thread.anonymous_to_peers = thread_data.get("anonymous_to_peers", False)
         thread.closed = thread_data.get("closed", False)
+        thread.closed_by = closed_by  # type: ignore[assignment]
+        thread.close_reason_code = thread_data.get("close_reason_code")
         thread.pinned = thread_data.get("pinned", False)
         thread.updated_at = parse_mongo_datetime(thread_data["updated_at"])  # type: ignore[assignment]
         thread.last_activity_at = parse_mongo_datetime(thread_data["last_activity_at"])
@@ -554,7 +568,6 @@ def log_deletion(
 def enable_mysql_backend_for_course(course_id: str) -> None:
     """Enable MySQL backend waffle flag for a course."""
     from opaque_keys.edx.keys import CourseKey
-
     from openedx.core.djangoapps.waffle_utils.models import (  # type: ignore[import-not-found]
         WaffleFlagCourseOverrideModel,
     )

@@ -134,10 +134,10 @@ class Content(models.Model):
         null=True
     )
     created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(
-        auto_now_add=True
+        default=timezone.now
     )
     updated_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(
-        auto_now=True
+        default=timezone.now
     )
     is_spam: models.BooleanField[bool, bool] = models.BooleanField(
         default=False,

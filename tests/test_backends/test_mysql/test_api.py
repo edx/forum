@@ -767,3 +767,103 @@ def test_delete_user_comments_with_deleted_by() -> None:
     comment.refresh_from_db()
     assert comment.is_deleted is True
     assert comment.deleted_by == admin
+
+
+
+@pytest.mark.django_db
+def test_build_course_stats_includes_anonymous_thread() -> None:
+    """build_course_stats should count anonymous threads in activity stats."""
+    user = User.objects.create(username="anon-user")
+    course_id = "course-anon"
+    CommentThread.objects.create(
+        author=user,
+        course_id=course_id,
+        title="Anon Thread",
+        body="body",
+        thread_type="discussion",
+        context="course",
+        anonymous=True,
+    )
+    backend.build_course_stats(str(user.pk), course_id)
+    stat = CourseStat.objects.get(user=user, course_id=course_id)
+    assert stat.threads == 1
+
+
+@pytest.mark.django_db
+def test_build_course_stats_includes_anonymous_to_peers_thread() -> None:
+    """build_course_stats should count anonymous_to_peers threads in activity stats."""
+    user = User.objects.create(username="anon-peers-user")
+    course_id = "course-anon-peers"
+    CommentThread.objects.create(
+        author=user,
+        course_id=course_id,
+        title="Anon to Peers Thread",
+        body="body",
+        thread_type="discussion",
+        context="course",
+        anonymous_to_peers=True,
+    )
+    backend.build_course_stats(str(user.pk), course_id)
+    stat = CourseStat.objects.get(user=user, course_id=course_id)
+    assert stat.threads == 1
+
+
+@pytest.mark.django_db
+def test_restore_anonymous_thread_updates_stats() -> None:
+    """restore_thread should update stats even for anonymous threads."""
+    user = User.objects.create(username="restore-anon-user")
+    course_id = "course-restore"
+    thread = CommentThread.objects.create(
+        author=user,
+        course_id=course_id,
+        title="Anon Thread",
+        body="body",
+        thread_type="discussion",
+        context="course",
+        anonymous=True,
+        is_deleted=True,
+    )
+    CourseStat.objects.create(
+        user=user,
+        course_id=course_id,
+        threads=0,
+        deleted_threads=1,
+    )
+    backend.restore_thread(str(thread.pk))
+    stat = CourseStat.objects.get(user=user, course_id=course_id)
+    assert stat.threads == 1
+    assert stat.deleted_threads == 0
+
+
+@pytest.mark.django_db
+def test_restore_anonymous_comment_updates_stats() -> None:
+    """restore_comment should update stats even for anonymous comments."""
+    user = User.objects.create(username="restore-anon-comment-user")
+    course_id = "course-restore-comment"
+    thread = CommentThread.objects.create(
+        author=user,
+        course_id=course_id,
+        title="Thread",
+        body="body",
+        thread_type="discussion",
+        context="course",
+    )
+    comment = Comment.objects.create(
+        author=user,
+        course_id=course_id,
+        body="anon comment",
+        comment_thread=thread,
+        anonymous=True,
+        is_deleted=True,
+    )
+    CourseStat.objects.create(
+        user=user,
+        course_id=course_id,
+        responses=0,
+        deleted_responses=1,
+    )
+    backend.restore_comment(str(comment.pk))
+    stat = CourseStat.objects.get(user=user, course_id=course_id)
+    assert stat.responses == 1
+    assert stat.deleted_responses == 0
+    assert stat.deleted_threads == 0

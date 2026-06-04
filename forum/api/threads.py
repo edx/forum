@@ -2,6 +2,8 @@
 Native Python Threads APIs.
 """
 
+# pylint: disable=import-outside-toplevel,cyclic-import
+
 import logging
 from typing import Any, Optional
 
@@ -219,7 +221,8 @@ def delete_thread(
 
     backend.delete_subscriptions_of_a_thread(thread_id)
     result = backend.soft_delete_thread(thread_id, deleted_by)
-    if result and not (thread["anonymous"] or thread["anonymous_to_peers"]):
+    is_anonymous = thread["anonymous"] or thread["anonymous_to_peers"]
+    if result and not (_backend_name(backend) == "mongodb" and is_anonymous):
         backend.update_stats_for_course(
             thread["author_id"],
             thread["course_id"],
@@ -374,14 +377,20 @@ def create_thread(
     except Exception as e:  # pylint: disable=broad-except
         log.error(f"AI moderation failed for thread {thread_id}: {e}")
 
-    if not (anonymous or anonymous_to_peers):
+    if thread is None:
+        raise ForumV2RequestError(
+            f"Failed to retrieve thread after creation: {thread_id}"
+        )
+
+    is_anonymous = anonymous or anonymous_to_peers
+    if not (_backend_name(backend) == "mongodb" and is_anonymous):
         backend.update_stats_for_course(
-            thread["author_id"], thread["course_id"], threads=1  # type: ignore[index]
+            thread["author_id"], thread["course_id"], threads=1
         )
 
     try:
         return prepare_thread_api_response(
-            thread,  # type: ignore[arg-type]
+            thread,
             backend,
             True,
             data,
@@ -437,11 +446,83 @@ def get_user_threads(
     params = {k: v for k, v in params.items() if v is not None}
     backend.validate_params(params)
 
-    thread_filter = backend.get_user_thread_filter(course_id)
-    filtered_threads = backend.get_filtered_threads(thread_filter, ids_only=True)
-    thread_ids = [thread["_id"] for thread in filtered_threads]
-    threads = backend.get_threads(params, user_id or "", ThreadSerializer, thread_ids)
+    # For "My Posts": get threads where user authored OR commented (non-anonymous)
+    if author_id and user_id and str(author_id) == str(user_id):
+        from forum.backends.mysql.api import MySQLBackend
 
+        if isinstance(backend, MySQLBackend):
+            from forum.backends.mysql.models import Comment, CommentThread
+
+            author_pk = int(author_id)
+            authored = CommentThread.objects.filter(
+                course_id=course_id,
+                author__pk=author_pk,
+                anonymous=False,
+                anonymous_to_peers=False,
+            ).values_list("pk", flat=True)
+            commented = (
+                Comment.objects.filter(
+                    course_id=course_id,
+                    author__pk=author_pk,
+                    anonymous=False,
+                    anonymous_to_peers=False,
+                )
+                .values_list("comment_thread__pk", flat=True)
+                .distinct()
+            )
+            thread_ids = [str(tid) for tid in set(authored) | set(commented)]
+        else:
+            from forum.backends.mongodb.comments import Comment  # type: ignore[assignment]
+            from forum.backends.mongodb.threads import CommentThread  # type: ignore[assignment]
+
+            query = {
+                "course_id": course_id,
+                "author_id": str(author_id),
+                "anonymous": False,
+                "anonymous_to_peers": False,
+            }
+            authored = CommentThread().distinct("_id", query)  # type: ignore[attr-defined]
+            commented = Comment().distinct("comment_thread_id", query)  # type: ignore[attr-defined]
+            thread_ids = [str(tid) for tid in set(authored) | set(commented)]
+        params.pop("author_id", None)
+    elif author_id:
+        # Viewing someone else's posts: show only their authored threads (not commented)
+        from forum.backends.mysql.api import MySQLBackend
+
+        if isinstance(backend, MySQLBackend):
+            from forum.backends.mysql.models import CommentThread
+
+            thread_ids = [
+                str(tid)
+                for tid in CommentThread.objects.filter(
+                    course_id=course_id,
+                    author__pk=int(author_id),
+                    anonymous=False,
+                    anonymous_to_peers=False,
+                ).values_list("pk", flat=True)
+            ]
+        else:
+            from forum.backends.mongodb.threads import CommentThread  # type: ignore[assignment]
+
+            thread_ids = [
+                str(tid)
+                for tid in CommentThread().distinct(  # type: ignore[attr-defined]
+                    "_id",
+                    {
+                        "course_id": course_id,
+                        "author_id": str(author_id),
+                        "anonymous": False,
+                        "anonymous_to_peers": False,
+                    },
+                )
+            ]
+        params.pop("author_id", None)
+    else:
+        thread_filter = backend.get_user_thread_filter(course_id)
+        filtered_threads = backend.get_filtered_threads(thread_filter, ids_only=True)
+        thread_ids = [thread["_id"] for thread in filtered_threads]
+
+    threads = backend.get_threads(params, user_id or "", ThreadSerializer, thread_ids)
     return threads
 
 
@@ -450,7 +531,6 @@ def get_course_id_by_thread(thread_id: str) -> str | None:
     Return course_id for the matching thread.
     It searches for thread_id both in mongodb and mysql.
     """
-    #  pylint: disable=C0415
     from forum.backends.mongodb.api import MongoBackend
     from forum.backends.mysql.api import MySQLBackend
 
