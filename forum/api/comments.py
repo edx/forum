@@ -157,8 +157,9 @@ def create_child_comment(
     # AI Moderation: Check for spam after successful creation
     try:
         moderate_and_flag_spam(body, comment, course_id, backend)
-        # Get the updated comment after AI moderation
-        comment = backend.get_comment(comment_id)
+        # Get the updated comment after AI moderation; fall back to the
+        # pre-deletion snapshot if spam auto-delete removed it (MySQL fix).
+        comment = backend.get_comment(comment_id) or comment
     except Exception as e:  # pylint: disable=broad-except
         log.error(f"AI moderation failed for child comment {comment_id}: {e}")
 
@@ -168,7 +169,7 @@ def create_child_comment(
         backend.mark_as_read(user_id, parent_comment["comment_thread_id"])
     try:
         comment_data = prepare_comment_api_response(
-            comment,  # type: ignore[arg-type]
+            comment,
             backend,
             exclude_fields=["endorsement", "sk"],
         )
@@ -349,14 +350,16 @@ def create_parent_comment(
     comment = backend.get_comment(comment_id) or {}
     try:
         moderate_and_flag_spam(body, comment, course_id, backend)
-        # Get the updated comment after AI moderation
-        comment = backend.get_comment(comment_id)  # type: ignore[assignment]
+        # Get the updated comment after AI moderation; fall back to the
+        # pre-deletion snapshot if spam auto-delete removed it (MySQL fix).
+        comment = backend.get_comment(comment_id) or comment
     except Exception as e:  # pylint: disable=broad-except
         log.error(f"AI moderation failed for parent comment {comment_id}: {e}")
 
     user = backend.get_user(user_id)
     if user and comment:
         backend.mark_as_read(user_id, thread_id)
+
     try:
         return prepare_comment_api_response(
             comment,
