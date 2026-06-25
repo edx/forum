@@ -4,10 +4,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from django.core.management.base import BaseCommand
-from django.core.management.base import CommandParser
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import connections
 
+import forum.migration_helpers as _migration_helpers
 from forum.migration_helpers import (
     BATCH_SIZE,
     enable_mysql_backend_for_course,
@@ -37,10 +37,6 @@ def _migrate_one_course(
     Returns ``(course_id, elapsed_seconds, error_message_or_None)``.
     Each thread gets its own MongoDB client and Django DB connection.
     """
-    # Ensure this thread does not reuse a connection inherited from the
-    # main thread (Django creates a new one on first access per thread).
-    connections.close_all()
-
     # Django stores DB connections in thread-local storage, so each worker
     # thread automatically gets its own connection on first access.
     # Explicitly close any connection inherited from the spawning thread
@@ -108,11 +104,16 @@ class Command(BaseCommand):
         db = get_database()
 
         create_waffle_flags = not options["no_toggle"]
-        workers: int = int(options["workers"])  # type: ignore[arg-type]
+        workers: int = int(str(options["workers"]))
+        batch_size: int = int(str(options["batch_size"]))
+
+        if workers < 1:
+            raise CommandError("--workers must be >= 1.")
+        if batch_size < 1:
+            raise CommandError("--batch-size must be >= 1.")
 
         # Override module-level BATCH_SIZE when caller passes --batch-size.
-        import forum.migration_helpers as _mh
-        _mh.BATCH_SIZE = int(options["batch_size"])  # type: ignore[arg-type]
+        _migration_helpers.BATCH_SIZE = batch_size
 
         course_ids = list(options["courses"])
         if "all" in course_ids:
@@ -121,7 +122,7 @@ class Command(BaseCommand):
         total = len(course_ids)
         self.stdout.write(
             f"Migrating {total} course(s) with {workers} parallel worker(s) "
-            f"(batch_size={_mh.BATCH_SIZE})."
+            f"(batch_size={_migration_helpers.BATCH_SIZE})."
         )
 
         failed: list[tuple[str, str]] = []
@@ -167,12 +168,12 @@ class Command(BaseCommand):
 
         if failed:
             self.stderr.write(
-                self.style.ERROR(
-                    f"\n{len(failed)} course(s) failed migration:"
-                )
+                self.style.ERROR(f"\n{len(failed)} course(s) failed migration:")
             )
             for cid, err in failed:
                 self.stderr.write(self.style.ERROR(f"  {cid}: {err}"))
-            raise SystemExit(1)
+            raise CommandError(
+                f"{len(failed)} course(s) failed migration. See stderr for details."
+            )
 
         self.stdout.write(self.style.SUCCESS("Data migration completed successfully"))
