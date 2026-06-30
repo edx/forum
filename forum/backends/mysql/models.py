@@ -459,7 +459,8 @@ class Comment(Content):
 
         # DB-level pagination instead of loading all then slicing
         if resp_limit is not None:
-            comments = comments[resp_skip : resp_skip + resp_limit]
+            resp_end = resp_skip + resp_limit
+            comments = comments[resp_skip:resp_end]
         elif resp_skip:
             comments = comments[resp_skip:]
 
