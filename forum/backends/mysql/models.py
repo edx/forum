@@ -437,40 +437,33 @@ class Comment(Content):
     def get_list(**kwargs: Any) -> list[dict[str, Any]]:
         """
         Retrieves a list of all comments in the database based on provided filters.
-
-        Args:
-            kwargs: The filter arguments.
-
-        Returns:
-            A list of comments.
+        Optimized with select_related and DB-level sorting/pagination.
         """
+        from django.db.models import F
+
         sort = kwargs.pop("sort", None)
         resp_skip = kwargs.pop("resp_skip", 0)
         resp_limit = kwargs.pop("resp_limit", None)
-        comments = Comment.objects.filter(**kwargs)
-        result = []
+
+        # select_related eliminates FK queries in to_dict()
+        comments = Comment.objects.filter(**kwargs).select_related(
+            'author', 'parent', 'comment_thread', 'deleted_by'
+        )
+
+        # DB-level sorting instead of Python sorted()
         if sort:
             if sort == 1:
-                result = sorted(
-                    comments, key=lambda x: (x.sort_key is None, x.sort_key or "")
-                )
+                comments = comments.order_by(F('sort_key').asc(nulls_last=True))
             elif sort == -1:
-                result = sorted(
-                    comments,
-                    key=lambda x: (x.sort_key is None, x.sort_key or ""),
-                    reverse=True,
-                )
+                comments = comments.order_by(F('sort_key').desc(nulls_last=True))
 
-        paginated_comments = result or list(comments)
-
-        # Apply pagination if resp_limit is provided
+        # DB-level pagination instead of loading all then slicing
         if resp_limit is not None:
-            resp_end = resp_skip + resp_limit
-            paginated_comments = result[resp_skip:resp_end]
-        elif resp_skip:  # If resp_limit is None but resp_skip is provided
-            paginated_comments = result[resp_skip:]
+            comments = comments[resp_skip:resp_skip + resp_limit]
+        elif resp_skip:
+            comments = comments[resp_skip:]
 
-        return [content.to_dict() for content in paginated_comments]
+        return [content.to_dict() for content in comments]
 
     @staticmethod
     def get_list_total_count(**kwargs: Any) -> int:
