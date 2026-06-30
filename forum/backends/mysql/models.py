@@ -447,19 +447,19 @@ class Comment(Content):
 
         # select_related eliminates FK queries in to_dict()
         comments = Comment.objects.filter(**kwargs).select_related(
-            'author', 'parent', 'comment_thread', 'deleted_by'
+            "author", "parent", "comment_thread", "deleted_by"
         )
 
         # DB-level sorting instead of Python sorted()
         if sort:
             if sort == 1:
-                comments = comments.order_by(F('sort_key').asc(nulls_last=True))
+                comments = comments.order_by(F("sort_key").asc(nulls_last=True))
             elif sort == -1:
-                comments = comments.order_by(F('sort_key').desc(nulls_last=True))
+                comments = comments.order_by(F("sort_key").desc(nulls_last=True))
 
         # DB-level pagination instead of loading all then slicing
         if resp_limit is not None:
-            comments = comments[resp_skip:resp_skip + resp_limit]
+            comments = comments[resp_skip : resp_skip + resp_limit]
         elif resp_skip:
             comments = comments[resp_skip:]
 
