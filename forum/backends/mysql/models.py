@@ -11,6 +11,7 @@ from django.contrib.auth.models import User  # pylint: disable=E5142
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
+from django.db.models import F
 from django.db import models
 from django.db.models import QuerySet
 from django.utils import timezone
@@ -439,7 +440,6 @@ class Comment(Content):
         Retrieves a list of all comments in the database based on provided filters.
         Optimized with select_related and DB-level sorting/pagination.
         """
-        from django.db.models import F
 
         sort = kwargs.pop("sort", None)
         resp_skip = kwargs.pop("resp_skip", 0)

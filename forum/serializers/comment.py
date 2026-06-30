@@ -86,21 +86,11 @@ class CommentSerializer(ContentSerializer):
         return list(serializer.data)
 
     def to_representation(self, instance: Any) -> dict[str, Any]:
+        """Return comment representation."""
         comment = super().to_representation(instance)
         comment.pop("historical_abuse_flaggers")
         if comment["parent_id"] == "None":
             comment["parent_id"] = None
-
-        thread = self.backend.get_thread(comment["thread_id"])
-        comment_from_db = self.backend.get_comment(comment["id"])
-        if (
-            not comment["endorsed"]
-            and comment_from_db
-            and "endorsement" not in comment_from_db
-            and thread
-            and thread["thread_type"] == "question"
-        ):
-            comment.pop("endorsement", None)
         return comment
 
     def create(self, validated_data: dict[str, Any]) -> Any:
