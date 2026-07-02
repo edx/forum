@@ -70,11 +70,14 @@ class CommentSerializer(ContentSerializer):
         if not self.context.get("recursive", False):
             return []
 
-        children = self.backend.get_comments(
-            parent_id=obj["_id"],
-            depth=1,
-            sort=self.context.get("sort", -1),
-        )
+        filter_kwargs: dict[str, Any] = {
+            "parent_id": obj["_id"],
+            "depth": 1,
+            "sort": self.context.get("sort", -1),
+        }
+        if not self.context.get("show_deleted", False):
+            filter_kwargs["is_deleted"] = False
+        children = self.backend.get_comments(**filter_kwargs)
         children_data = prepare_comment_data_for_get_children(children)
         serializer = CommentSerializer(
             children_data,

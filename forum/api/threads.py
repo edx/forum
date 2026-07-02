@@ -122,6 +122,7 @@ def prepare_thread_api_response(
                     "mark_as_read",
                     "reverse_order",
                     "merge_question_type_responses",
+                    "show_deleted",
                 ]
                 for param in params:
                     value = data_or_params.get(param)
