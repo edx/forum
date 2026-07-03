@@ -1727,6 +1727,9 @@ class MySQLBackend(AbstractBackend):
             comment.deleted_at = timezone.now()
             comment.deleted_by = deleted_user  # type: ignore[assignment]
             comment.save()
+            Comment.objects.filter(pk=comment.parent.pk, child_count__gt=0).update(
+                child_count=F("child_count") - 1
+            )
             # replies_deleted = 1 (one reply), responses_deleted = 0
             return 0, 1
 
@@ -1747,6 +1750,7 @@ class MySQLBackend(AbstractBackend):
                 deleted_by=deleted_user,
             )
         # responses_deleted = 1 (the parent), replies_deleted = number updated
+        Comment.objects.filter(pk=comment.pk).update(child_count=0)
         return 1, int(replies_deleted)
 
     @classmethod
@@ -1773,6 +1777,9 @@ class MySQLBackend(AbstractBackend):
             # Update user course stats
             if is_reply:
                 # This is a reply - increment replies, decrement deleted_replies
+                Comment.objects.filter(pk=comment.parent.pk).update(
+                    child_count=F("child_count") + 1
+                )
                 cls.update_stats_for_course(
                     author_id, course_id, replies=1, deleted_replies=-1
                 )
@@ -1782,6 +1789,8 @@ class MySQLBackend(AbstractBackend):
                 deleted_child_count = Comment.objects.filter(
                     parent=comment, is_deleted=True
                 ).count()
+                total_children = Comment.objects.filter(parent=comment).count()
+                Comment.objects.filter(pk=comment.pk).update(child_count=total_children)
 
                 cls.update_stats_for_course(
                     author_id,

@@ -1717,6 +1717,8 @@ class MongoBackend(AbstractBackend):
             kwargs["comment_thread_id"] = ObjectId(kwargs["comment_thread_id"])
         if parent_id := kwargs.get("parent_id"):
             kwargs["parent_id"] = ObjectId(parent_id)
+        if "is_deleted" in kwargs and kwargs["is_deleted"] is False:
+            kwargs["is_deleted"] = {"$ne": True}
 
         return list(Comment().get_list(**kwargs))
 
@@ -1727,6 +1729,8 @@ class MongoBackend(AbstractBackend):
             kwargs["comment_thread_id"] = ObjectId(kwargs["comment_thread_id"])
         if parent_id := kwargs.get("parent_id"):
             kwargs["parent_id"] = ObjectId(parent_id)
+        if "is_deleted" in kwargs and kwargs["is_deleted"] is False:
+            kwargs["is_deleted"] = {"$ne": True}
 
         return Comment().count_documents(kwargs)
 
@@ -1740,16 +1744,32 @@ class MongoBackend(AbstractBackend):
         """Delete comment."""
         Comment().delete(comment_id)
 
-    @staticmethod
+    @classmethod
     def soft_delete_comment(
-        comment_id: str, deleted_by: Optional[str] = None
+        cls, comment_id: str, deleted_by: Optional[str] = None
     ) -> tuple[int, int]:
         """Soft delete comment by marking it as deleted.
 
         Returns:
             tuple: (responses_deleted, replies_deleted)
         """
-        return Comment().delete(comment_id, mode="soft", deleted_by=deleted_by)
+        comment = Comment().get(comment_id)
+        result = Comment().delete(comment_id, mode="soft", deleted_by=deleted_by)
+
+        if comment:
+            if comment.get("parent_id"):
+                # It's a reply — decrement parent's child_count
+                parent_id = str(comment["parent_id"])
+                parent = Comment().get(parent_id)
+                if parent:
+                    current_count = parent.get("child_count", 0)
+                    if current_count > 0:
+                        Comment().update(parent_id, child_count=current_count - 1)
+            else:
+                # It's a response — set child_count to 0 (all children soft-deleted)
+                Comment().update(str(comment["_id"]), child_count=0)
+
+        return result
 
     @staticmethod
     def get_thread_id_from_comment(comment_id: str) -> dict[str, Any] | None:
@@ -1791,10 +1811,28 @@ class MongoBackend(AbstractBackend):
             thread_id, is_deleted=True, deleted_at=datetime.now(), deleted_by=deleted_by
         )
 
-    @staticmethod
-    def restore_comment(comment_id: str, restored_by: Optional[str] = None) -> bool:
+    @classmethod
+    def restore_comment(
+        cls, comment_id: str, restored_by: Optional[str] = None
+    ) -> bool:
         """Restore a soft-deleted comment."""
-        return Comment().restore_comment(comment_id, restored_by=restored_by)
+        comment = Comment().get(comment_id)
+        result = Comment().restore_comment(comment_id, restored_by=restored_by)
+
+        if comment:
+            if comment.get("parent_id"):
+                # It's a reply — increment parent's child_count
+                parent_id = str(comment["parent_id"])
+                parent = Comment().get(parent_id)
+                if parent:
+                    current_count = parent.get("child_count", 0)
+                    Comment().update(parent_id, child_count=current_count + 1)
+            else:
+                # It's a response — restore child_count to total children
+                children = Comment().find({"parent_id": comment["_id"]})
+                total_children = sum(1 for _ in children)
+                Comment().update(str(comment["_id"]), child_count=total_children)
+        return result
 
     @staticmethod
     def restore_thread(thread_id: str, restored_by: Optional[str] = None) -> bool:

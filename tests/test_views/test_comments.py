@@ -179,7 +179,7 @@ def test_delete_child_comment(api_client: APIClient, patched_get_backend: Any) -
     new_child_count = parent_comment.get("child_count")
 
     assert new_child_count is not None
-    assert new_child_count == previous_child_count
+    assert new_child_count == previous_child_count - 1
 
 
 def test_returns_400_when_comment_does_not_exist(

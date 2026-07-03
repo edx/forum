@@ -89,6 +89,7 @@ class ThreadSerializer(ContentSerializer):
         self.merge_question_type_responses = self.context_data.pop(
             "merge_question_type_responses", False
         )
+        self.show_deleted = self.context_data.pop("show_deleted", False)
 
         # Customize fields based on context
         if not self.with_responses:
@@ -205,14 +206,17 @@ class ThreadSerializer(ContentSerializer):
         """
         if self.with_responses:
             sorting_order = -1 if self.context_data.get("reverse_order", True) else 1
-            children = self.backend.get_comments(
-                comment_thread_id=obj["_id"],
-                depth=0,
-                parent_id=None,
-                sort=sorting_order,
-                resp_skip=obj["resp_skip"],
-                resp_limit=obj["resp_limit"],
-            )
+            filter_kwargs: dict[str, Any] = {
+                "comment_thread_id": obj["_id"],
+                "depth": 0,
+                "parent_id": None,
+                "sort": sorting_order,
+                "resp_skip": obj["resp_skip"],
+                "resp_limit": obj["resp_limit"],
+            }
+            if not self.show_deleted:
+                filter_kwargs["is_deleted"] = False
+            children = self.backend.get_comments(**filter_kwargs)
             children_data = prepare_comment_data_for_get_children(children)
             serializer = CommentSerializer(
                 data=children_data,
@@ -220,6 +224,7 @@ class ThreadSerializer(ContentSerializer):
                 context={
                     "recursive": self.context_data.get("recursive", False),
                     "sort": sorting_order,
+                    "show_deleted": self.show_deleted,
                 },
                 exclude_fields=["sk"],
                 backend=self.backend,
@@ -240,11 +245,14 @@ class ThreadSerializer(ContentSerializer):
             int: The total number of responses, defaulting to 0 if not included.
         """
         if self.with_responses:
-            return self.backend.get_comments_count(
-                comment_thread_id=obj["_id"],
-                depth=0,
-                parent_id=None,
-            )
+            filter_kwargs: dict[str, Any] = {
+                "comment_thread_id": obj["_id"],
+                "depth": 0,
+                "parent_id": None,
+            }
+            if not self.show_deleted:
+                filter_kwargs["is_deleted"] = False
+            return self.backend.get_comments_count(**filter_kwargs)
         return 0
 
     def to_representation(self, instance: dict[str, Any]) -> dict[str, Any]:
