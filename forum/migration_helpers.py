@@ -128,7 +128,7 @@ def _set_if_changed(obj: Any, field: str, value: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def migrate_users(
+def migrate_users(  # pylint: disable=too-many-statements
     db: Database[dict[str, Any]],
     course_id: str,
     updated_since: datetime | None = None,
@@ -189,7 +189,9 @@ def migrate_users(
             new_forum_users, batch_size=BATCH_SIZE, ignore_conflicts=True
         )
     if fu_to_update:
-        ForumUser.objects.bulk_update(fu_to_update, ["default_sort_key"], batch_size=BATCH_SIZE)
+        ForumUser.objects.bulk_update(
+            fu_to_update, ["default_sort_key"], batch_size=BATCH_SIZE
+        )
 
     # --- CourseStat: bulk create new / bulk update existing ---
     existing_stats: dict[int, CourseStat] = {
@@ -222,15 +224,29 @@ def migrate_users(
             if uid in existing_stats:
                 cs = existing_stats[uid]
                 stat_changed = False
-                stat_changed |= _set_if_changed(cs, "active_flags", stat.get("active_flags", 0))
-                stat_changed |= _set_if_changed(cs, "inactive_flags", stat.get("inactive_flags", 0))
+                stat_changed |= _set_if_changed(
+                    cs, "active_flags", stat.get("active_flags", 0)
+                )
+                stat_changed |= _set_if_changed(
+                    cs, "inactive_flags", stat.get("inactive_flags", 0)
+                )
                 stat_changed |= _set_if_changed(cs, "threads", stat.get("threads", 0))
-                stat_changed |= _set_if_changed(cs, "responses", stat.get("responses", 0))
+                stat_changed |= _set_if_changed(
+                    cs, "responses", stat.get("responses", 0)
+                )
                 stat_changed |= _set_if_changed(cs, "replies", stat.get("replies", 0))
-                stat_changed |= _set_if_changed(cs, "deleted_threads", stat.get("deleted_threads", 0))
-                stat_changed |= _set_if_changed(cs, "deleted_responses", stat.get("deleted_responses", 0))
-                stat_changed |= _set_if_changed(cs, "deleted_replies", stat.get("deleted_replies", 0))
-                stat_changed |= _set_if_changed(cs, "last_activity_at", last_activity_at)
+                stat_changed |= _set_if_changed(
+                    cs, "deleted_threads", stat.get("deleted_threads", 0)
+                )
+                stat_changed |= _set_if_changed(
+                    cs, "deleted_responses", stat.get("deleted_responses", 0)
+                )
+                stat_changed |= _set_if_changed(
+                    cs, "deleted_replies", stat.get("deleted_replies", 0)
+                )
+                stat_changed |= _set_if_changed(
+                    cs, "last_activity_at", last_activity_at
+                )
                 if stat_changed:
                     stats_to_update.append(cs)
             else:
@@ -537,6 +553,14 @@ def _bulk_migrate_threads(  # pylint: disable=too-many-statements
             if not thread:
                 continue
 
+            updated_at = parse_mongo_datetime(t["updated_at"])
+
+            # Fast-skip: if updated_at already matches what is in MySQL this
+            # thread was fully migrated in a prior run and nothing changed.
+            # Avoids all field comparisons and the SQL UPDATE on retry.
+            if thread.updated_at == updated_at:
+                continue
+
             deleted_by = (
                 user_cache.get(_to_int_id(t.get("deleted_by")))  # type: ignore[arg-type]
                 if t.get("deleted_by")
@@ -547,7 +571,6 @@ def _bulk_migrate_threads(  # pylint: disable=too-many-statements
                 if t.get("closed_by_id")
                 else None
             )
-            updated_at = parse_mongo_datetime(t["updated_at"])
             last_activity_at = parse_mongo_datetime(t["last_activity_at"])
             deleted_at = parse_mongo_datetime(t.get("deleted_at"))
 
@@ -788,25 +811,38 @@ def _bulk_migrate_comments(  # pylint: disable=too-many-statements
             comment: Comment | None = comment_pk_map.get(mc.content_object_id)  # type: ignore[no-redef]
             if not comment:
                 continue
+            updated_at = parse_mongo_datetime(c["updated_at"])
+
+            # Fast-skip: if updated_at already matches MySQL, nothing changed.
+            if comment.updated_at == updated_at:
+                continue
+
             deleted_by = (
                 user_cache.get(_to_int_id(c.get("deleted_by")))  # type: ignore[arg-type]
                 if c.get("deleted_by")
                 else None
             )
-            updated_at = parse_mongo_datetime(c["updated_at"])
             deleted_at = parse_mongo_datetime(c.get("deleted_at"))
 
             has_changes = False
             has_changes |= _set_if_changed(comment, "body", c["body"])
-            has_changes |= _set_if_changed(comment, "anonymous", c.get("anonymous", False))
+            has_changes |= _set_if_changed(
+                comment, "anonymous", c.get("anonymous", False)
+            )
             has_changes |= _set_if_changed(
                 comment, "anonymous_to_peers", c.get("anonymous_to_peers", False)
             )
-            has_changes |= _set_if_changed(comment, "endorsed", c.get("endorsed", False))
-            has_changes |= _set_if_changed(comment, "child_count", c.get("child_count", 0))
+            has_changes |= _set_if_changed(
+                comment, "endorsed", c.get("endorsed", False)
+            )
+            has_changes |= _set_if_changed(
+                comment, "child_count", c.get("child_count", 0)
+            )
             has_changes |= _set_if_changed(comment, "updated_at", updated_at)
             has_changes |= _set_if_changed(comment, "is_spam", c.get("is_spam", False))
-            has_changes |= _set_if_changed(comment, "is_deleted", c.get("is_deleted", False))
+            has_changes |= _set_if_changed(
+                comment, "is_deleted", c.get("is_deleted", False)
+            )
             has_changes |= _set_if_changed(comment, "deleted_at", deleted_at)
             has_changes |= _set_if_changed(comment, "deleted_by", deleted_by)
             has_changes |= _set_if_changed(comment, "visible", c.get("visible", True))
@@ -854,7 +890,9 @@ def _bulk_migrate_votes(
     }
 
     new_votes: list[UserVote] = []
-    changed_votes: list[tuple[int, int, int, int]] = []  # (uid, ct_id, obj_id, new_vote)
+    changed_votes: list[tuple[int, int, int, int]] = (
+        []
+    )  # (uid, ct_id, obj_id, new_vote)
     seen_vote_keys: set[tuple[int, int, int]] = set(existing_vote_map.keys())
 
     for uid, ct_id, obj_id, vote_val in candidates:

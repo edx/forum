@@ -1,9 +1,9 @@
 """Migration command for courses from mongodb to mysql."""
 
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from typing import Any, cast
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import connections
@@ -83,7 +83,7 @@ class Command(BaseCommand):
             ) from exc
 
         if timezone.is_naive(parsed):
-            parsed = timezone.make_aware(parsed, timezone=timezone.utc)
+            parsed = timezone.make_aware(parsed, timezone=dt_timezone.utc)
         return parsed
 
     def add_arguments(self, parser: CommandParser) -> None:
@@ -136,7 +136,8 @@ class Command(BaseCommand):
         create_waffle_flags = not options["no_toggle"]
         workers: int = int(str(options["workers"]))
         batch_size: int = int(str(options["batch_size"]))
-        updated_since = self._parse_updated_since(options.get("updated_since"))
+        updated_since_raw = cast(str | None, options.get("updated_since"))
+        updated_since = self._parse_updated_since(updated_since_raw)
 
         if workers < 1:
             raise CommandError("--workers must be >= 1.")

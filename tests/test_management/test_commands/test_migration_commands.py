@@ -1,5 +1,6 @@
 """Test forum mongodb migration commands."""
 
+from datetime import timedelta
 from io import StringIO
 from typing import Any
 
@@ -22,7 +23,6 @@ from forum.models import (
     UserVote,
 )
 from forum.utils import get_trunc_title
-
 
 pytestmark = pytest.mark.django_db
 
@@ -955,7 +955,7 @@ def test_remigrate_updates_changed_thread_and_comment(
     thread_id = ObjectId()
     comment_id = ObjectId()
     first_time = timezone.now()
-    second_time = first_time + timezone.timedelta(minutes=5)
+    second_time = first_time + timedelta(minutes=5)
 
     patched_mongodb.contents.insert_many(
         [
@@ -1070,7 +1070,7 @@ def test_remigrate_skips_noop_thread_bulk_update(
 
     call_command("forum_migrate_course_from_mongodb_to_mysql", "test_course")
 
-    assert bulk_update_calls == []
+    assert not bulk_update_calls
 
 
 def test_updated_since_filters_content(patched_mongodb: Database[Any]) -> None:
@@ -1078,7 +1078,7 @@ def test_updated_since_filters_content(patched_mongodb: Database[Any]) -> None:
     old_thread_id = ObjectId()
     new_thread_id = ObjectId()
     now = timezone.now()
-    cutoff = now - timezone.timedelta(hours=1)
+    cutoff = now - timedelta(hours=1)
 
     User.objects.create(id=1, username="testuser")
 
@@ -1091,9 +1091,9 @@ def test_updated_since_filters_content(patched_mongodb: Database[Any]) -> None:
                 "course_id": "test_course",
                 "title": "Old thread",
                 "body": "Old body",
-                "created_at": now - timezone.timedelta(days=2),
-                "updated_at": now - timezone.timedelta(days=2),
-                "last_activity_at": now - timezone.timedelta(days=2),
+                "created_at": now - timedelta(days=2),
+                "updated_at": now - timedelta(days=2),
+                "last_activity_at": now - timedelta(days=2),
                 "votes": {"up": [], "down": []},
                 "abuse_flaggers": [],
                 "historical_abuse_flaggers": [],
@@ -1105,9 +1105,9 @@ def test_updated_since_filters_content(patched_mongodb: Database[Any]) -> None:
                 "course_id": "test_course",
                 "title": "New thread",
                 "body": "New body",
-                "created_at": now - timezone.timedelta(minutes=30),
-                "updated_at": now - timezone.timedelta(minutes=30),
-                "last_activity_at": now - timezone.timedelta(minutes=30),
+                "created_at": now - timedelta(minutes=30),
+                "updated_at": now - timedelta(minutes=30),
+                "last_activity_at": now - timedelta(minutes=30),
                 "votes": {"up": [], "down": []},
                 "abuse_flaggers": [],
                 "historical_abuse_flaggers": [],
@@ -1129,7 +1129,7 @@ def test_updated_since_filters_content(patched_mongodb: Database[Any]) -> None:
 def test_updated_since_filters_users(patched_mongodb: Database[Any]) -> None:
     """Only users with recent course_stats.last_activity_at should be migrated."""
     now = timezone.now()
-    cutoff = now - timezone.timedelta(hours=1)
+    cutoff = now - timedelta(hours=1)
 
     User.objects.create(id=1, username="olduser")
     User.objects.create(id=2, username="newuser")
@@ -1144,7 +1144,7 @@ def test_updated_since_filters_users(patched_mongodb: Database[Any]) -> None:
                     {
                         "course_id": "test_course",
                         "threads": 1,
-                        "last_activity_at": now - timezone.timedelta(days=2),
+                        "last_activity_at": now - timedelta(days=2),
                     }
                 ],
             },
@@ -1156,7 +1156,7 @@ def test_updated_since_filters_users(patched_mongodb: Database[Any]) -> None:
                     {
                         "course_id": "test_course",
                         "threads": 2,
-                        "last_activity_at": now - timezone.timedelta(minutes=10),
+                        "last_activity_at": now - timedelta(minutes=10),
                     }
                 ],
             },
@@ -1177,7 +1177,7 @@ def test_updated_since_filters_users(patched_mongodb: Database[Any]) -> None:
 def test_updated_since_filters_subscriptions(patched_mongodb: Database[Any]) -> None:
     """Subscription delta should use subscription.updated_at, even if content is older."""
     now = timezone.now()
-    cutoff = now - timezone.timedelta(hours=1)
+    cutoff = now - timedelta(hours=1)
     thread_id = ObjectId()
 
     User.objects.create(id=1, username="author")
@@ -1192,9 +1192,9 @@ def test_updated_since_filters_subscriptions(patched_mongodb: Database[Any]) -> 
             "course_id": "test_course",
             "title": "Thread",
             "body": "Body",
-            "created_at": now - timezone.timedelta(days=2),
-            "updated_at": now - timezone.timedelta(days=2),
-            "last_activity_at": now - timezone.timedelta(days=2),
+            "created_at": now - timedelta(days=2),
+            "updated_at": now - timedelta(days=2),
+            "last_activity_at": now - timedelta(days=2),
             "votes": {"up": [], "down": []},
             "abuse_flaggers": [],
             "historical_abuse_flaggers": [],
@@ -1211,16 +1211,16 @@ def test_updated_since_filters_subscriptions(patched_mongodb: Database[Any]) -> 
                 "source_id": str(thread_id),
                 "source_type": "CommentThread",
                 "source": {"course_id": "test_course"},
-                "created_at": now - timezone.timedelta(days=2),
-                "updated_at": now - timezone.timedelta(days=2),
+                "created_at": now - timedelta(days=2),
+                "updated_at": now - timedelta(days=2),
             },
             {
                 "subscriber_id": "3",
                 "source_id": str(thread_id),
                 "source_type": "CommentThread",
                 "source": {"course_id": "test_course"},
-                "created_at": now - timezone.timedelta(minutes=30),
-                "updated_at": now - timezone.timedelta(minutes=30),
+                "created_at": now - timedelta(minutes=30),
+                "updated_at": now - timedelta(minutes=30),
             },
         ]
     )
