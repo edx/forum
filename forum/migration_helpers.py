@@ -115,19 +115,44 @@ def _build_user_cache(user_ids: set[int]) -> dict[int, User]:
     return {u.pk: u for u in User.objects.filter(pk__in=user_ids)}
 
 
+def _set_if_changed(obj: Any, field: str, value: Any) -> bool:
+    """Set obj.<field> only when value differs; return whether a change happened."""
+    if getattr(obj, field) != value:
+        setattr(obj, field, value)
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # migrate_users  (batch-optimised)
 # ---------------------------------------------------------------------------
 
 
-def migrate_users(db: Database[dict[str, Any]], course_id: str) -> None:
+def migrate_users(
+    db: Database[dict[str, Any]],
+    course_id: str,
+    updated_since: datetime | None = None,
+) -> None:
     """
     Migrate users from MongoDB to MySQL.
 
     Uses bulk_create / bulk_update instead of per-row get_or_create calls,
     reducing the number of SQL round-trips from O(N) to O(1).
     """
-    all_mongo_users = list(db.users.find({"course_stats.course_id": course_id}))
+    users_query: dict[str, Any]
+    if updated_since is not None:
+        users_query = {
+            "course_stats": {
+                "$elemMatch": {
+                    "course_id": course_id,
+                    "last_activity_at": {"$gte": updated_since},
+                }
+            }
+        }
+    else:
+        users_query = {"course_stats.course_id": course_id}
+
+    all_mongo_users = list(db.users.find(users_query))
     if not all_mongo_users:
         return
 
@@ -144,24 +169,27 @@ def migrate_users(db: Database[dict[str, Any]], course_id: str) -> None:
     # --- Single bulk fetch of all Django users for this course ---
     django_users = {u.pk: u for u in User.objects.filter(pk__in=uid_map.keys())}
 
-    # --- ForumUser: create missing rows in one shot ---
-    existing_fu_ids = set(
-        ForumUser.objects.filter(user_id__in=django_users.keys()).values_list(
-            "user_id", flat=True
-        )
-    )
-    new_forum_users = [
-        ForumUser(
-            user_id=uid,
-            default_sort_key=uid_map[uid].get("default_sort_key", "date"),
-        )
-        for uid in django_users
-        if uid not in existing_fu_ids
-    ]
+    # --- ForumUser: create missing rows; update default_sort_key if changed ---
+    existing_fu_map: dict[int, ForumUser] = {
+        fu.user_id: fu  # type: ignore[attr-defined]
+        for fu in ForumUser.objects.filter(user_id__in=django_users.keys())
+    }
+    new_forum_users = []
+    fu_to_update: list[ForumUser] = []
+    for uid in django_users:
+        sort_key = uid_map[uid].get("default_sort_key", "date")
+        if uid not in existing_fu_map:
+            new_forum_users.append(ForumUser(user_id=uid, default_sort_key=sort_key))
+        else:
+            fu = existing_fu_map[uid]
+            if _set_if_changed(fu, "default_sort_key", sort_key):
+                fu_to_update.append(fu)
     if new_forum_users:
         ForumUser.objects.bulk_create(
             new_forum_users, batch_size=BATCH_SIZE, ignore_conflicts=True
         )
+    if fu_to_update:
+        ForumUser.objects.bulk_update(fu_to_update, ["default_sort_key"], batch_size=BATCH_SIZE)
 
     # --- CourseStat: bulk create new / bulk update existing ---
     existing_stats: dict[int, CourseStat] = {
@@ -193,16 +221,18 @@ def migrate_users(db: Database[dict[str, Any]], course_id: str) -> None:
             last_activity_at = parse_mongo_datetime(stat.get("last_activity_at"))
             if uid in existing_stats:
                 cs = existing_stats[uid]
-                cs.active_flags = stat.get("active_flags", 0)
-                cs.inactive_flags = stat.get("inactive_flags", 0)
-                cs.threads = stat.get("threads", 0)
-                cs.responses = stat.get("responses", 0)
-                cs.replies = stat.get("replies", 0)
-                cs.deleted_threads = stat.get("deleted_threads", 0)
-                cs.deleted_responses = stat.get("deleted_responses", 0)
-                cs.deleted_replies = stat.get("deleted_replies", 0)
-                cs.last_activity_at = last_activity_at
-                stats_to_update.append(cs)
+                stat_changed = False
+                stat_changed |= _set_if_changed(cs, "active_flags", stat.get("active_flags", 0))
+                stat_changed |= _set_if_changed(cs, "inactive_flags", stat.get("inactive_flags", 0))
+                stat_changed |= _set_if_changed(cs, "threads", stat.get("threads", 0))
+                stat_changed |= _set_if_changed(cs, "responses", stat.get("responses", 0))
+                stat_changed |= _set_if_changed(cs, "replies", stat.get("replies", 0))
+                stat_changed |= _set_if_changed(cs, "deleted_threads", stat.get("deleted_threads", 0))
+                stat_changed |= _set_if_changed(cs, "deleted_responses", stat.get("deleted_responses", 0))
+                stat_changed |= _set_if_changed(cs, "deleted_replies", stat.get("deleted_replies", 0))
+                stat_changed |= _set_if_changed(cs, "last_activity_at", last_activity_at)
+                if stat_changed:
+                    stats_to_update.append(cs)
             else:
                 stats_to_create.append(
                     CourseStat(
@@ -235,7 +265,11 @@ def migrate_users(db: Database[dict[str, Any]], course_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def migrate_content(db: Database[dict[str, Any]], course_id: str) -> None:
+def migrate_content(
+    db: Database[dict[str, Any]],
+    course_id: str,
+    updated_since: datetime | None = None,
+) -> None:
     """
     Migrate threads and comments from MongoDB to MySQL.
 
@@ -250,56 +284,70 @@ def migrate_content(db: Database[dict[str, Any]], course_id: str) -> None:
     6.  Issue a SINGLE MongoDB ``$in`` query for all subscriptions
         instead of one query per content item.
     """
-    contents = list(db.contents.find({"course_id": course_id}).sort("created_at", 1))
-    if not contents:
-        return
+    content_query: dict[str, Any] = {"course_id": course_id}
+    if updated_since is not None:
+        content_query["updated_at"] = {"$gte": updated_since}
+
+    contents = list(db.contents.find(content_query).sort("created_at", 1))
 
     all_ids_str = [str(c["_id"]) for c in contents]
 
-    # Pre-fetch all existing MongoContent rows (one query).
-    mongo_cache: dict[str, MongoContent] = {
-        mc.mongo_id: mc for mc in MongoContent.objects.filter(mongo_id__in=all_ids_str)
-    }
+    # Pre-fetch existing MongoContent rows for selected content.
+    mongo_cache: dict[str, MongoContent] = {}
+    if all_ids_str:
+        mongo_cache = {
+            mc.mongo_id: mc
+            for mc in MongoContent.objects.filter(mongo_id__in=all_ids_str)
+        }
 
-    # Collect every user ID referenced anywhere; fetch them all at once.
+    # Collect every user ID referenced in selected content; fetch them all at once.
     user_cache = _build_user_cache(_collect_all_user_ids(contents))
 
     # ContentType objects are cached by Django's framework after the first call.
     thread_ct = ContentType.objects.get_for_model(CommentThread)
     comment_ct = ContentType.objects.get_for_model(Comment)
 
-    threads_data = [c for c in contents if c["_type"] == "CommentThread"]
-    comments_data = [c for c in contents if c["_type"] == "Comment"]
+    if contents:
+        threads_data = [c for c in contents if c["_type"] == "CommentThread"]
+        comments_data = [c for c in contents if c["_type"] == "Comment"]
 
-    # --- Threads ---
-    _bulk_migrate_threads(threads_data, mongo_cache, user_cache, thread_ct)
-    _refresh_mongo_cache(mongo_cache, [str(t["_id"]) for t in threads_data])
+        # --- Threads ---
+        _bulk_migrate_threads(threads_data, mongo_cache, user_cache, thread_ct)
+        _refresh_mongo_cache(mongo_cache, [str(t["_id"]) for t in threads_data])
 
-    # --- Comments: top-level first, then children (parent must exist first) ---
-    top_level = [
-        c
-        for c in comments_data
-        if not c.get("parent_id") or str(c.get("parent_id")) == "None"
-    ]
-    child_comments = [
-        c
-        for c in comments_data
-        if c.get("parent_id") and str(c.get("parent_id")) != "None"
-    ]
-    _bulk_migrate_comments(top_level, mongo_cache, user_cache, comment_ct)
-    _refresh_mongo_cache(mongo_cache, [str(c["_id"]) for c in top_level])
-    _bulk_migrate_comments(child_comments, mongo_cache, user_cache, comment_ct)
-    _refresh_mongo_cache(mongo_cache, [str(c["_id"]) for c in child_comments])
+        # --- Comments: top-level first, then children (parent must exist first) ---
+        top_level = [
+            c
+            for c in comments_data
+            if not c.get("parent_id") or str(c.get("parent_id")) == "None"
+        ]
+        child_comments = [
+            c
+            for c in comments_data
+            if c.get("parent_id") and str(c.get("parent_id")) != "None"
+        ]
+        _bulk_migrate_comments(top_level, mongo_cache, user_cache, comment_ct)
+        _refresh_mongo_cache(mongo_cache, [str(c["_id"]) for c in top_level])
+        _bulk_migrate_comments(child_comments, mongo_cache, user_cache, comment_ct)
+        _refresh_mongo_cache(mongo_cache, [str(c["_id"]) for c in child_comments])
 
-    # --- Metadata: votes, edit history, flaggers ---
-    _bulk_migrate_votes(contents, mongo_cache, user_cache, thread_ct, comment_ct)
-    _bulk_migrate_edit_history(contents, mongo_cache, user_cache, thread_ct, comment_ct)
-    _bulk_migrate_abuse_flaggers(
-        contents, mongo_cache, user_cache, thread_ct, comment_ct
+        # --- Metadata: votes, edit history, flaggers ---
+        _bulk_migrate_votes(contents, mongo_cache, user_cache, thread_ct, comment_ct)
+        _bulk_migrate_edit_history(
+            contents, mongo_cache, user_cache, thread_ct, comment_ct
+        )
+        _bulk_migrate_abuse_flaggers(
+            contents, mongo_cache, user_cache, thread_ct, comment_ct
+        )
+
+    # --- Subscriptions: query by course (and optional updated_since) ---
+    _bulk_migrate_subscriptions(
+        db,
+        course_id,
+        mongo_cache,
+        user_cache,
+        updated_since=updated_since,
     )
-
-    # --- Subscriptions: ONE MongoDB query for the entire course ---
-    _bulk_migrate_subscriptions(db, all_ids_str, mongo_cache, user_cache)
 
 
 def _refresh_mongo_cache(cache: dict[str, MongoContent], mongo_ids: list[str]) -> None:
@@ -389,16 +437,26 @@ def _bulk_migrate_threads(  # pylint: disable=too-many-statements
 
         if pairs:
             mongo_ids, objs = zip(*pairs)
+            obj_list = list(objs)
+            _course_id = obj_list[0].course_id
 
-            # MySQL's bulk_create does not always return PKs (Django feature
-            # flag can_return_rows_from_bulk_insert may be False).  Snapshot
-            # the current max PK so we can re-fetch created rows afterwards.
-            # This is safe because migration runs as a single writer.
+            # Snapshot max PK before bulk_create, then re-fetch by pk range
+            # narrowed to this course_id so a concurrent insert for a different
+            # course cannot shift the mongo_id ↔ PK zip alignment.
             max_pk_before = CommentThread.objects.aggregate(Max("pk"))["pk__max"] or 0
-            CommentThread.objects.bulk_create(list(objs), batch_size=BATCH_SIZE)
+            CommentThread.objects.bulk_create(obj_list, batch_size=BATCH_SIZE)
             created = list(
-                CommentThread.objects.filter(pk__gt=max_pk_before).order_by("pk")
+                CommentThread.objects.filter(
+                    pk__gt=max_pk_before, course_id=_course_id
+                ).order_by("pk")
             )
+            if len(created) != len(obj_list):
+                raise RuntimeError(
+                    f"Thread bulk_create count mismatch for course {_course_id}: "
+                    f"submitted {len(obj_list)}, re-fetched {len(created)}. "
+                    "A concurrent writer may have inserted rows between the PK "
+                    "snapshot and re-fetch."
+                )
             mc_rows = [
                 MongoContent(
                     mongo_id=mid,
@@ -447,6 +505,7 @@ def _bulk_migrate_threads(  # pylint: disable=too-many-statements
             mongo_cache[str(t["_id"])].content_object_id
             for t in existing_data
             if str(t["_id"]) in mongo_cache
+            and mongo_cache[str(t["_id"])].content_object_id is not None
         ]
         thread_pk_map = {th.pk: th for th in CommentThread.objects.filter(pk__in=pks)}
         thread_update_fields = [
@@ -477,6 +536,7 @@ def _bulk_migrate_threads(  # pylint: disable=too-many-statements
             thread = thread_pk_map.get(mc.content_object_id)
             if not thread:
                 continue
+
             deleted_by = (
                 user_cache.get(_to_int_id(t.get("deleted_by")))  # type: ignore[arg-type]
                 if t.get("deleted_by")
@@ -487,25 +547,44 @@ def _bulk_migrate_threads(  # pylint: disable=too-many-statements
                 if t.get("closed_by_id")
                 else None
             )
-            thread.title = get_trunc_title(t.get("title", ""))
-            thread.body = t["body"]
-            thread.thread_type = t.get("thread_type", "discussion")
-            thread.context = t.get("context", "course")
-            thread.anonymous = t.get("anonymous", False)
-            thread.anonymous_to_peers = t.get("anonymous_to_peers", False)
-            thread.closed = t.get("closed", False)
-            thread.closed_by = closed_by  # type: ignore[assignment]
-            thread.close_reason_code = t.get("close_reason_code")
-            thread.pinned = t.get("pinned", False)
-            thread.updated_at = parse_mongo_datetime(t["updated_at"])  # type: ignore[assignment]
-            thread.last_activity_at = parse_mongo_datetime(t["last_activity_at"])
-            thread.commentable_id = t.get("commentable_id")  # type: ignore[assignment]
-            thread.is_spam = t.get("is_spam", False)
-            thread.is_deleted = t.get("is_deleted", False)
-            thread.deleted_at = parse_mongo_datetime(t.get("deleted_at"))
-            thread.deleted_by = deleted_by  # type: ignore[assignment]
-            thread.visible = t.get("visible", True)
-            to_update.append(thread)
+            updated_at = parse_mongo_datetime(t["updated_at"])
+            last_activity_at = parse_mongo_datetime(t["last_activity_at"])
+            deleted_at = parse_mongo_datetime(t.get("deleted_at"))
+
+            # Check each field directly to avoid defining a closure inside the
+            # loop (which captures variables by reference and confuses linters).
+            changed_fields: list[str] = []
+            for _f, _v in (
+                ("title", get_trunc_title(t.get("title", ""))),
+                ("body", t["body"]),
+                ("thread_type", t.get("thread_type", "discussion")),
+                ("context", t.get("context", "course")),
+                ("anonymous", t.get("anonymous", False)),
+                ("anonymous_to_peers", t.get("anonymous_to_peers", False)),
+                ("closed", t.get("closed", False)),
+                ("closed_by", closed_by),
+                ("close_reason_code", t.get("close_reason_code")),
+                ("pinned", t.get("pinned", False)),
+                ("updated_at", updated_at),
+                ("last_activity_at", last_activity_at),
+                ("commentable_id", t.get("commentable_id")),
+                ("is_spam", t.get("is_spam", False)),
+                ("is_deleted", t.get("is_deleted", False)),
+                ("deleted_at", deleted_at),
+                ("deleted_by", deleted_by),
+                ("visible", t.get("visible", True)),
+            ):
+                if _set_if_changed(thread, _f, _v):
+                    changed_fields.append(_f)
+
+            if changed_fields:
+                logger.info(
+                    "Updated mapped thread during migration: mongo_id=%s thread_id=%s changed_fields=%s",
+                    str(t["_id"]),
+                    thread.pk,
+                    ",".join(changed_fields),
+                )
+                to_update.append(thread)
         if to_update:
             CommentThread.objects.bulk_update(
                 to_update, thread_update_fields, batch_size=BATCH_SIZE
@@ -607,12 +686,25 @@ def _bulk_migrate_comments(  # pylint: disable=too-many-statements
 
         if pairs:
             mongo_ids, objs = zip(*pairs)
+            obj_list = list(objs)
+            _course_id = obj_list[0].course_id
 
-            # Same max-PK-before trick as for threads: MySQL may not return
-            # PKs from bulk_create, so we re-fetch created rows by pk range.
+            # Narrow re-fetch to this course so a concurrent insert for a
+            # different course cannot misalign the mongo_id ↔ PK zip.
             max_pk_before = Comment.objects.aggregate(Max("pk"))["pk__max"] or 0
-            Comment.objects.bulk_create(list(objs), batch_size=BATCH_SIZE)
-            created = list(Comment.objects.filter(pk__gt=max_pk_before).order_by("pk"))
+            Comment.objects.bulk_create(obj_list, batch_size=BATCH_SIZE)
+            created = list(
+                Comment.objects.filter(
+                    pk__gt=max_pk_before, course_id=_course_id
+                ).order_by("pk")
+            )
+            if len(created) != len(obj_list):
+                raise RuntimeError(
+                    f"Comment bulk_create count mismatch for course {_course_id}: "
+                    f"submitted {len(obj_list)}, re-fetched {len(created)}. "
+                    "A concurrent writer may have inserted rows between the PK "
+                    "snapshot and re-fetch."
+                )
 
             mc_rows = []
             sort_key_updates: list[Comment] = []
@@ -672,6 +764,7 @@ def _bulk_migrate_comments(  # pylint: disable=too-many-statements
             mongo_cache[str(c["_id"])].content_object_id
             for c in existing_data
             if str(c["_id"]) in mongo_cache
+            and mongo_cache[str(c["_id"])].content_object_id is not None
         ]
         comment_pk_map = {cm.pk: cm for cm in Comment.objects.filter(pk__in=pks)}
         comment_update_fields = [
@@ -700,18 +793,26 @@ def _bulk_migrate_comments(  # pylint: disable=too-many-statements
                 if c.get("deleted_by")
                 else None
             )
-            comment.body = c["body"]
-            comment.anonymous = c.get("anonymous", False)
-            comment.anonymous_to_peers = c.get("anonymous_to_peers", False)
-            comment.endorsed = c.get("endorsed", False)
-            comment.child_count = c.get("child_count", 0)
-            comment.updated_at = parse_mongo_datetime(c["updated_at"])  # type: ignore[assignment]
-            comment.is_spam = c.get("is_spam", False)
-            comment.is_deleted = c.get("is_deleted", False)
-            comment.deleted_at = parse_mongo_datetime(c.get("deleted_at"))
-            comment.deleted_by = deleted_by  # type: ignore[assignment]
-            comment.visible = c.get("visible", True)
-            to_update.append(comment)
+            updated_at = parse_mongo_datetime(c["updated_at"])
+            deleted_at = parse_mongo_datetime(c.get("deleted_at"))
+
+            has_changes = False
+            has_changes |= _set_if_changed(comment, "body", c["body"])
+            has_changes |= _set_if_changed(comment, "anonymous", c.get("anonymous", False))
+            has_changes |= _set_if_changed(
+                comment, "anonymous_to_peers", c.get("anonymous_to_peers", False)
+            )
+            has_changes |= _set_if_changed(comment, "endorsed", c.get("endorsed", False))
+            has_changes |= _set_if_changed(comment, "child_count", c.get("child_count", 0))
+            has_changes |= _set_if_changed(comment, "updated_at", updated_at)
+            has_changes |= _set_if_changed(comment, "is_spam", c.get("is_spam", False))
+            has_changes |= _set_if_changed(comment, "is_deleted", c.get("is_deleted", False))
+            has_changes |= _set_if_changed(comment, "deleted_at", deleted_at)
+            has_changes |= _set_if_changed(comment, "deleted_by", deleted_by)
+            has_changes |= _set_if_changed(comment, "visible", c.get("visible", True))
+
+            if has_changes:
+                to_update.append(comment)
         if to_update:
             Comment.objects.bulk_update(
                 to_update, comment_update_fields, batch_size=BATCH_SIZE
@@ -743,26 +844,44 @@ def _bulk_migrate_votes(
         return
 
     obj_ids = {obj_id for _, _, obj_id, _ in candidates}
-    existing_keys = set(
-        UserVote.objects.filter(content_object_id__in=obj_ids).values_list(
-            "user_id", "content_type_id", "content_object_id"
+    # Fetch existing votes WITH their direction so changed votes (e.g. up → down)
+    # are detected and corrected, not silently skipped.
+    existing_vote_map: dict[tuple[int, int, int], int] = {
+        (row[0], row[1], row[2]): row[3]
+        for row in UserVote.objects.filter(content_object_id__in=obj_ids).values_list(
+            "user_id", "content_type_id", "content_object_id", "vote"
         )
-    )
+    }
 
-    new_votes = [
-        UserVote(
-            user_id=uid,
-            content_type_id=ct_id,
-            content_object_id=obj_id,
-            vote=vote_val,
-        )
-        for uid, ct_id, obj_id, vote_val in candidates
-        if (uid, ct_id, obj_id) not in existing_keys
-    ]
+    new_votes: list[UserVote] = []
+    changed_votes: list[tuple[int, int, int, int]] = []  # (uid, ct_id, obj_id, new_vote)
+    seen_vote_keys: set[tuple[int, int, int]] = set(existing_vote_map.keys())
+
+    for uid, ct_id, obj_id, vote_val in candidates:
+        key = (uid, ct_id, obj_id)
+        if key not in existing_vote_map:
+            if key not in seen_vote_keys:
+                new_votes.append(
+                    UserVote(
+                        user_id=uid,
+                        content_type_id=ct_id,
+                        content_object_id=obj_id,
+                        vote=vote_val,
+                    )
+                )
+                seen_vote_keys.add(key)
+        elif existing_vote_map[key] != vote_val:
+            # Vote direction changed between Phase 1 and Phase 2 refresh.
+            changed_votes.append((uid, ct_id, obj_id, vote_val))
+
     if new_votes:
         UserVote.objects.bulk_create(
             new_votes, batch_size=BATCH_SIZE, ignore_conflicts=True
         )
+    for uid, ct_id, obj_id, vote_val in changed_votes:
+        UserVote.objects.filter(
+            user_id=uid, content_type_id=ct_id, content_object_id=obj_id
+        ).update(vote=vote_val)
 
 
 def _bulk_migrate_edit_history(
@@ -888,9 +1007,10 @@ def _bulk_migrate_abuse_flaggers(
 
 def _bulk_migrate_subscriptions(
     db: Database[dict[str, Any]],
-    content_ids_str: list[str],
+    course_id: str,
     mongo_cache: dict[str, MongoContent],
     user_cache: dict[int, User],
+    updated_since: datetime | None = None,
 ) -> None:
     """
     Migrate subscriptions for an entire course using a SINGLE MongoDB query.
@@ -898,27 +1018,58 @@ def _bulk_migrate_subscriptions(
     The original code fired one ``db.subscriptions.find()`` per content
     item.  This version fetches them all at once via ``$in``.
     """
-    if not content_ids_str:
-        return
+    sub_query: dict[str, Any] = {"source.course_id": course_id}
+    if updated_since is not None:
+        sub_query["updated_at"] = {"$gte": updated_since}
 
-    all_subs = list(db.subscriptions.find({"source_id": {"$in": content_ids_str}}))
+    all_subs = list(db.subscriptions.find(sub_query))
     if not all_subs:
         return
 
     thread_ct = ContentType.objects.get_for_model(CommentThread)
     comment_ct = ContentType.objects.get_for_model(Comment)
 
-    obj_ids = [
-        mc.content_object_id for mc in mongo_cache.values() if mc.content_object_id
+    source_ids = {
+        str(sub.get("source_id"))
+        for sub in all_subs
+        if sub.get("source_id") is not None
+    }
+
+    missing_source_ids = [sid for sid in source_ids if sid not in mongo_cache]
+    if missing_source_ids:
+        mongo_cache.update(
+            {
+                mc.mongo_id: mc
+                for mc in MongoContent.objects.filter(mongo_id__in=missing_source_ids)
+            }
+        )
+
+    mapped_source_obj_ids = [
+        mc.content_object_id
+        for sid in source_ids
+        for mc in [mongo_cache.get(sid)]
+        if mc and mc.content_object_id
     ]
+
     existing_sub_map: dict[tuple[int, int, int], Subscription] = {
         (
             cast(int, s.subscriber_id),  # type: ignore[attr-defined]
             cast(int, s.source_content_type_id),  # type: ignore[attr-defined]
             s.source_object_id,
         ): s
-        for s in Subscription.objects.filter(source_object_id__in=obj_ids)
+        for s in Subscription.objects.filter(source_object_id__in=mapped_source_obj_ids)
     }
+
+    # Subscription subscribers who never authored/voted on content are absent
+    # from the caller's user_cache.  Fetch any missing ones now.
+    missing_sub_uids: set[int] = set()
+    for sub in all_subs:
+        uid = _to_int_id(sub.get("subscriber_id"))
+        if uid is not None and uid not in user_cache:
+            missing_sub_uids.add(uid)
+    if missing_sub_uids:
+        extra_users = {u.pk: u for u in User.objects.filter(pk__in=missing_sub_uids)}
+        user_cache = {**user_cache, **extra_users}
 
     subs_to_create: list[Subscription] = []
     subs_to_update: list[Subscription] = []
@@ -942,9 +1093,13 @@ def _bulk_migrate_subscriptions(
 
         if key in existing_sub_map:
             s = existing_sub_map[key]
-            s.created_at = created_at
-            s.updated_at = updated_at
-            subs_to_update.append(s)
+            # updated_at is the reliable change signal for subscriptions:
+            # it is set on creation and advances on any mutation. If it
+            # matches what is already in MySQL, nothing changed — skip.
+            if s.updated_at != updated_at:
+                s.created_at = created_at
+                s.updated_at = updated_at
+                subs_to_update.append(s)
         elif key not in seen:
             subs_to_create.append(
                 Subscription(
@@ -1069,8 +1224,9 @@ def migrate_read_states(db: Database[dict[str, Any]], course_id: str) -> None:
                 key = (rs.pk, thread_pk)
                 if key in existing_lrt:
                     lrt = existing_lrt[key]
-                    lrt.timestamp = parsed_ts  # type: ignore[assignment]
-                    lrt_to_update.append(lrt)
+                    if lrt.timestamp != parsed_ts:
+                        lrt.timestamp = parsed_ts  # type: ignore[assignment]
+                        lrt_to_update.append(lrt)
                 elif key not in seen_keys:
                     lrt_to_create.append(
                         LastReadTime(
@@ -1098,15 +1254,14 @@ def delete_course_data(
     stdout: OutputWrapper,
 ) -> None:
     """Delete content (threads and comments)."""
-    contents = db.contents.find({"course_id": course_id})
-    for content in contents:
-        subscriptions = (
-            db.subscriptions.delete_many({"source_id": str(content["_id"])})
-            if not dry_run
-            else None
-        )
+    contents = list(db.contents.find({"course_id": course_id}))
+    content_ids = [str(c["_id"]) for c in contents]
+    # Delete all subscriptions in one $in query instead of one-per-content.
+    sub_result = None
+    if content_ids and not dry_run:
+        sub_result = db.subscriptions.delete_many({"source_id": {"$in": content_ids}})
     stdout.write(
-        f"Subscription documents to be deleted: {subscriptions.deleted_count if subscriptions else 'N/A (dry run)'}"
+        f"Subscription documents to be deleted: {sub_result.deleted_count if sub_result else 'N/A (dry run)'}"
     )
 
     content_result = (
@@ -1163,6 +1318,8 @@ def enable_mysql_backend_for_course(course_id: str) -> None:
     from forum.toggles import ENABLE_MYSQL_BACKEND
 
     course_key = CourseKey.from_string(course_id)
-    WaffleFlagCourseOverrideModel.objects.create(
-        course_id=course_key, waffle_flag=ENABLE_MYSQL_BACKEND.name, enabled=True
+    WaffleFlagCourseOverrideModel.objects.update_or_create(
+        course_id=course_key,
+        waffle_flag=ENABLE_MYSQL_BACKEND.name,
+        defaults={"enabled": True},
     )

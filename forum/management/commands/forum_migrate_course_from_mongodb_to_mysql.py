@@ -1,11 +1,13 @@
 """Migration command for courses from mongodb to mysql."""
 
+from datetime import datetime
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import connections
+from django.utils import timezone
 
 import forum.migration_helpers as _migration_helpers
 from forum.migration_helpers import (
@@ -30,6 +32,7 @@ DEFAULT_WORKERS = 1
 def _migrate_one_course(
     course_id: str,
     create_waffle_flags: bool,
+    updated_since: datetime | None = None,
 ) -> tuple[str, float | None, str | None]:
     """
     Migrate a single course in the calling thread.
@@ -46,8 +49,8 @@ def _migrate_one_course(
     db = get_database()
     t0 = time.monotonic()
     try:
-        migrate_users(db, course_id)
-        migrate_content(db, course_id)
+        migrate_users(db, course_id, updated_since=updated_since)
+        migrate_content(db, course_id, updated_since=updated_since)
         migrate_read_states(db, course_id)
         if create_waffle_flags:
             enable_mysql_backend_for_course(course_id)
@@ -65,6 +68,23 @@ class Command(BaseCommand):
     """Migration command for courses from mongodb to mysql."""
 
     help = "Migrate data from MongoDB to MySQL"
+
+    @staticmethod
+    def _parse_updated_since(raw: str | None) -> datetime | None:
+        """Parse an ISO8601 timestamp for incremental migration filtering."""
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise CommandError(
+                "--updated-since must be a valid ISO8601 datetime, "
+                "for example: 2026-07-17T00:00:00Z"
+            ) from exc
+
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone=timezone.utc)
+        return parsed
 
     def add_arguments(self, parser: CommandParser) -> None:
         """Add arguments to the command."""
@@ -96,6 +116,16 @@ class Command(BaseCommand):
             help=f"Bulk-operation batch size (default: {BATCH_SIZE}).",
         )
         parser.add_argument(
+            "--updated-since",
+            type=str,
+            default=None,
+            help=(
+                "Optional ISO8601 datetime filter. Only Mongo records updated "
+                "on/after this time are migrated for users/content/subscriptions. "
+                "Example: 2026-07-17T00:00:00Z"
+            ),
+        )
+        parser.add_argument(
             "courses", nargs="+", type=str, help="List of course IDs or `all`"
         )
 
@@ -106,6 +136,7 @@ class Command(BaseCommand):
         create_waffle_flags = not options["no_toggle"]
         workers: int = int(str(options["workers"]))
         batch_size: int = int(str(options["batch_size"]))
+        updated_since = self._parse_updated_since(options.get("updated_since"))
 
         if workers < 1:
             raise CommandError("--workers must be >= 1.")
@@ -120,10 +151,13 @@ class Command(BaseCommand):
             course_ids = get_all_course_ids(db)
 
         total = len(course_ids)
-        self.stdout.write(
+        run_msg = (
             f"Migrating {total} course(s) with {workers} parallel worker(s) "
             f"(batch_size={_migration_helpers.BATCH_SIZE})."
         )
+        if updated_since is not None:
+            run_msg += f" updated_since={updated_since.isoformat()}"
+        self.stdout.write(run_msg)
 
         failed: list[tuple[str, str]] = []
         completed = 0
@@ -131,7 +165,11 @@ class Command(BaseCommand):
         if workers == 1:
             # Single-threaded path: simpler, no executor overhead.
             for course_id in course_ids:
-                cid, elapsed, err = _migrate_one_course(course_id, create_waffle_flags)
+                cid, elapsed, err = _migrate_one_course(
+                    course_id,
+                    create_waffle_flags,
+                    updated_since=updated_since,
+                )
                 completed += 1
                 if err:
                     self.stderr.write(
@@ -147,7 +185,12 @@ class Command(BaseCommand):
         else:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = {
-                    pool.submit(_migrate_one_course, cid, create_waffle_flags): cid
+                    pool.submit(
+                        _migrate_one_course,
+                        cid,
+                        create_waffle_flags,
+                        updated_since,
+                    ): cid
                     for cid in course_ids
                 }
                 for future in as_completed(futures):
