@@ -1,5 +1,6 @@
 """Test forum mongodb migration commands."""
 
+from datetime import timedelta
 from io import StringIO
 from typing import Any
 
@@ -22,7 +23,6 @@ from forum.models import (
     UserVote,
 )
 from forum.utils import get_trunc_title
-
 
 pytestmark = pytest.mark.django_db
 
@@ -946,3 +946,292 @@ def test_migrate_comment_fallback_to_current_username(
     mongo_comment = MongoContent.objects.get(mongo_id=comment_id)
     comment = Comment.objects.get(pk=mongo_comment.content_object_id)
     assert comment.author_username == "current_username"
+
+
+def test_remigrate_updates_changed_thread_and_comment(
+    patched_mongodb: Database[Any],
+) -> None:
+    """Ensure remigration updates already-mapped thread/comment when Mongo changed."""
+    thread_id = ObjectId()
+    comment_id = ObjectId()
+    first_time = timezone.now()
+    second_time = first_time + timedelta(minutes=5)
+
+    patched_mongodb.contents.insert_many(
+        [
+            {
+                "_id": thread_id,
+                "_type": "CommentThread",
+                "author_id": "1",
+                "course_id": "test_course",
+                "title": "Initial Title",
+                "body": "Initial thread body",
+                "created_at": first_time,
+                "updated_at": first_time,
+                "last_activity_at": first_time,
+                "votes": {"up": [], "down": []},
+                "abuse_flaggers": [],
+                "historical_abuse_flaggers": [],
+            },
+            {
+                "_id": comment_id,
+                "_type": "Comment",
+                "author_id": "1",
+                "course_id": "test_course",
+                "body": "Initial comment body",
+                "created_at": first_time,
+                "updated_at": first_time,
+                "comment_thread_id": thread_id,
+                "votes": {"up": [], "down": []},
+                "abuse_flaggers": [],
+                "historical_abuse_flaggers": [],
+                "depth": 0,
+                "sk": f"{comment_id}",
+            },
+        ]
+    )
+
+    User.objects.create(id=1, username="testuser")
+
+    call_command("forum_migrate_course_from_mongodb_to_mysql", "test_course")
+
+    patched_mongodb.contents.update_one(
+        {"_id": thread_id},
+        {
+            "$set": {
+                "title": "Updated Title",
+                "body": "Updated thread body",
+                "updated_at": second_time,
+                "last_activity_at": second_time,
+            }
+        },
+    )
+    patched_mongodb.contents.update_one(
+        {"_id": comment_id},
+        {
+            "$set": {
+                "body": "Updated comment body",
+                "updated_at": second_time,
+            }
+        },
+    )
+
+    call_command("forum_migrate_course_from_mongodb_to_mysql", "test_course")
+
+    mongo_thread = MongoContent.objects.get(mongo_id=thread_id)
+    migrated_thread = CommentThread.objects.get(pk=mongo_thread.content_object_id)
+    assert migrated_thread.title == "Updated Title"
+    assert migrated_thread.body == "Updated thread body"
+
+    mongo_comment = MongoContent.objects.get(mongo_id=comment_id)
+    migrated_comment = Comment.objects.get(pk=mongo_comment.content_object_id)
+    assert migrated_comment.body == "Updated comment body"
+
+
+def test_remigrate_skips_noop_thread_bulk_update(
+    patched_mongodb: Database[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ensure unchanged mapped threads are not sent to bulk_update."""
+    thread_id = ObjectId()
+    now = timezone.now()
+
+    patched_mongodb.contents.insert_one(
+        {
+            "_id": thread_id,
+            "_type": "CommentThread",
+            "author_id": "1",
+            "course_id": "test_course",
+            "title": "Stable Title",
+            "body": "Stable body",
+            "created_at": now,
+            "updated_at": now,
+            "last_activity_at": now,
+            "votes": {"up": [], "down": []},
+            "abuse_flaggers": [],
+            "historical_abuse_flaggers": [],
+        }
+    )
+    User.objects.create(id=1, username="testuser")
+
+    call_command("forum_migrate_course_from_mongodb_to_mysql", "test_course")
+
+    original_bulk_update = CommentThread.objects.bulk_update
+    bulk_update_calls: list[int] = []
+
+    def _tracking_bulk_update(
+        objs: list[CommentThread],
+        fields: list[str],
+        batch_size: int | None = None,
+    ) -> None:
+        bulk_update_calls.append(len(objs))
+        original_bulk_update(objs, fields, batch_size=batch_size)
+
+    monkeypatch.setattr(CommentThread.objects, "bulk_update", _tracking_bulk_update)
+
+    call_command("forum_migrate_course_from_mongodb_to_mysql", "test_course")
+
+    assert not bulk_update_calls
+
+
+def test_updated_since_filters_content(patched_mongodb: Database[Any]) -> None:
+    """Only content updated on/after cutoff should be migrated."""
+    old_thread_id = ObjectId()
+    new_thread_id = ObjectId()
+    now = timezone.now()
+    cutoff = now - timedelta(hours=1)
+
+    User.objects.create(id=1, username="testuser")
+
+    patched_mongodb.contents.insert_many(
+        [
+            {
+                "_id": old_thread_id,
+                "_type": "CommentThread",
+                "author_id": "1",
+                "course_id": "test_course",
+                "title": "Old thread",
+                "body": "Old body",
+                "created_at": now - timedelta(days=2),
+                "updated_at": now - timedelta(days=2),
+                "last_activity_at": now - timedelta(days=2),
+                "votes": {"up": [], "down": []},
+                "abuse_flaggers": [],
+                "historical_abuse_flaggers": [],
+            },
+            {
+                "_id": new_thread_id,
+                "_type": "CommentThread",
+                "author_id": "1",
+                "course_id": "test_course",
+                "title": "New thread",
+                "body": "New body",
+                "created_at": now - timedelta(minutes=30),
+                "updated_at": now - timedelta(minutes=30),
+                "last_activity_at": now - timedelta(minutes=30),
+                "votes": {"up": [], "down": []},
+                "abuse_flaggers": [],
+                "historical_abuse_flaggers": [],
+            },
+        ]
+    )
+
+    call_command(
+        "forum_migrate_course_from_mongodb_to_mysql",
+        "test_course",
+        "--updated-since",
+        cutoff.isoformat(),
+    )
+
+    assert not MongoContent.objects.filter(mongo_id=str(old_thread_id)).exists()
+    assert MongoContent.objects.filter(mongo_id=str(new_thread_id)).exists()
+
+
+def test_updated_since_filters_users(patched_mongodb: Database[Any]) -> None:
+    """Only users with recent course_stats.last_activity_at should be migrated."""
+    now = timezone.now()
+    cutoff = now - timedelta(hours=1)
+
+    User.objects.create(id=1, username="olduser")
+    User.objects.create(id=2, username="newuser")
+
+    patched_mongodb.users.insert_many(
+        [
+            {
+                "_id": "1",
+                "username": "olduser",
+                "default_sort_key": "date",
+                "course_stats": [
+                    {
+                        "course_id": "test_course",
+                        "threads": 1,
+                        "last_activity_at": now - timedelta(days=2),
+                    }
+                ],
+            },
+            {
+                "_id": "2",
+                "username": "newuser",
+                "default_sort_key": "date",
+                "course_stats": [
+                    {
+                        "course_id": "test_course",
+                        "threads": 2,
+                        "last_activity_at": now - timedelta(minutes=10),
+                    }
+                ],
+            },
+        ]
+    )
+
+    call_command(
+        "forum_migrate_course_from_mongodb_to_mysql",
+        "test_course",
+        "--updated-since",
+        cutoff.isoformat(),
+    )
+
+    assert not CourseStat.objects.filter(user_id=1, course_id="test_course").exists()
+    assert CourseStat.objects.filter(user_id=2, course_id="test_course").exists()
+
+
+def test_updated_since_filters_subscriptions(patched_mongodb: Database[Any]) -> None:
+    """Subscription delta should use subscription.updated_at, even if content is older."""
+    now = timezone.now()
+    cutoff = now - timedelta(hours=1)
+    thread_id = ObjectId()
+
+    User.objects.create(id=1, username="author")
+    User.objects.create(id=2, username="sub_old")
+    User.objects.create(id=3, username="sub_new")
+
+    patched_mongodb.contents.insert_one(
+        {
+            "_id": thread_id,
+            "_type": "CommentThread",
+            "author_id": "1",
+            "course_id": "test_course",
+            "title": "Thread",
+            "body": "Body",
+            "created_at": now - timedelta(days=2),
+            "updated_at": now - timedelta(days=2),
+            "last_activity_at": now - timedelta(days=2),
+            "votes": {"up": [], "down": []},
+            "abuse_flaggers": [],
+            "historical_abuse_flaggers": [],
+        }
+    )
+
+    # First run creates MongoContent mapping for the thread.
+    call_command("forum_migrate_course_from_mongodb_to_mysql", "test_course")
+
+    patched_mongodb.subscriptions.insert_many(
+        [
+            {
+                "subscriber_id": "2",
+                "source_id": str(thread_id),
+                "source_type": "CommentThread",
+                "source": {"course_id": "test_course"},
+                "created_at": now - timedelta(days=2),
+                "updated_at": now - timedelta(days=2),
+            },
+            {
+                "subscriber_id": "3",
+                "source_id": str(thread_id),
+                "source_type": "CommentThread",
+                "source": {"course_id": "test_course"},
+                "created_at": now - timedelta(minutes=30),
+                "updated_at": now - timedelta(minutes=30),
+            },
+        ]
+    )
+
+    call_command(
+        "forum_migrate_course_from_mongodb_to_mysql",
+        "test_course",
+        "--updated-since",
+        cutoff.isoformat(),
+    )
+
+    subs = Subscription.objects.all()
+    assert subs.count() == 1
+    assert subs.first().subscriber_id == 3  # type: ignore[union-attr]
