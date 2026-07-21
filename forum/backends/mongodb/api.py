@@ -1995,6 +1995,10 @@ class MongoBackend(AbstractBackend):
     @staticmethod
     def get_users(**kwargs: Any) -> list[dict[str, Any]]:
         """Get users."""
+        kwargs = kwargs.copy()
+        username_in = kwargs.pop("username__in", None)
+        if username_in is not None:
+            kwargs["username"] = {"$in": username_in}
         return list(Users().get_list(**kwargs))
 
     @staticmethod
