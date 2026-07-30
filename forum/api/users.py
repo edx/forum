@@ -137,7 +137,13 @@ def retire_user(
     backend = get_backend(course_id)()
     user = backend.get_user(user_id)
     if not user:
-        raise ForumV2RequestError(f"user not found with id: {user_id}")
+        # User never had forum activity — nothing to retire. Return success to
+        # match the behaviour of the legacy cs_comments_service which returned 404
+        # for missing users (treated as a no-op by the retirement pipeline).
+        log.info(
+            "retire_user: no forum record found for user_id=%s, skipping.", user_id
+        )
+        return {"message": "User not found in forum, nothing to retire"}
 
     # Prepare update data
     data = {

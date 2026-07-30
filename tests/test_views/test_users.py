@@ -393,7 +393,7 @@ def test_attempts_to_retire_user_without_sending_retired_username(
 def test_attempts_to_retire_non_existent_user(
     api_client: APIClient, patched_get_backend: Any
 ) -> None:
-    """Test retire non-existent user."""
+    """Test retire non-existent user returns 200 (no-op, nothing to retire)."""
     backend = patched_get_backend
     user_id = backend.generate_id()
     retired_username = "retired_user_test"
@@ -401,7 +401,7 @@ def test_attempts_to_retire_non_existent_user(
         f"/api/v2/users/{user_id}/retire",
         data={"retired_username": retired_username},
     )
-    assert response.status_code == 400
+    assert response.status_code == 200
 
 
 def test_retire_user(api_client: APIClient, patched_get_backend: Any) -> None:
