@@ -92,6 +92,7 @@ distlib==0.4.0
     #   -c https:/raw.githubusercontent.com/edx/edx-lint/master/edx_lint/files/common_constraints.txt
     #   -r requirements/base.txt
     #   django-crum
+    #   django-model-utils
     #   django-waffle
     #   djangorestframework
     #   edx-django-utils
@@ -104,6 +105,8 @@ django-crum==0.7.9
     #   -r requirements/base.txt
     #   edx-django-utils
     #   edx-toggles
+django-model-utils==5.0.0
+    # via -r requirements/base.txt
 django-waffle==5.0.0
     # via
     #   -r requirements/base.txt

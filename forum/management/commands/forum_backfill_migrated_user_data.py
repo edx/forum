@@ -110,9 +110,7 @@ def chunked(values: list[T], size: int = ID_CHUNK_SIZE) -> Iterable[list[T]]:
 # ---------------------------------------------------------------------------
 
 
-def collect_course_user_ids(
-    db: Database[dict[str, Any]], course_id: str
-) -> set[int]:
+def collect_course_user_ids(db: Database[dict[str, Any]], course_id: str) -> set[int]:
     """
     Return every user ID associated with *course_id*, from MongoDB and MySQL.
 
@@ -191,9 +189,7 @@ def existing_django_user_ids(user_ids: set[int]) -> set[int]:
     """Filter *user_ids* down to accounts that exist in Django."""
     found: set[int] = set()
     for chunk in chunked(sorted(user_ids)):
-        found.update(
-            User.objects.filter(pk__in=chunk).values_list("pk", flat=True)
-        )
+        found.update(User.objects.filter(pk__in=chunk).values_list("pk", flat=True))
     return found
 
 
@@ -226,7 +222,9 @@ def flagged_object_counts_by_author(
     return counts
 
 
-def derive_course_stats(course_id: str, user_ids: set[int]) -> dict[int, dict[str, Any]]:
+def derive_course_stats(
+    course_id: str, user_ids: set[int]
+) -> dict[int, dict[str, Any]]:
     """
     Derive per-user course stats for *course_id* from content already in MySQL.
 
@@ -519,10 +517,7 @@ def backfill_read_states(
 
     if missing_states:
         ReadState.objects.bulk_create(
-            [
-                ReadState(user_id=uid, course_id=course_id)
-                for uid in missing_states
-            ],
+            [ReadState(user_id=uid, course_id=course_id) for uid in missing_states],
             batch_size=batch_size,
             ignore_conflicts=True,
         )
@@ -538,8 +533,8 @@ def backfill_read_states(
 
     # Map MongoDB thread ids to migrated CommentThread primary keys.
     thread_pks: dict[str, int] = {}
-    for chunk in chunked(sorted(thread_mongo_ids)):
-        for mapping in MongoContent.objects.filter(mongo_id__in=chunk):
+    for mongo_id_chunk in chunked(sorted(thread_mongo_ids)):
+        for mapping in MongoContent.objects.filter(mongo_id__in=mongo_id_chunk):
             if mapping.content_object_id:
                 thread_pks[mapping.mongo_id] = mapping.content_object_id
 
@@ -597,9 +592,7 @@ def backfill_course(
     user_ids = existing_django_user_ids(candidate_ids)
 
     forum_users = backfill_forum_users(db, user_ids, batch_size, dry_run)
-    course_stats = backfill_course_stats(
-        db, course_id, user_ids, batch_size, dry_run
-    )
+    course_stats = backfill_course_stats(db, course_id, user_ids, batch_size, dry_run)
     read_states, last_read_times = backfill_read_states(
         db, course_id, user_ids, batch_size, dry_run
     )
