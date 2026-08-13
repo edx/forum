@@ -123,6 +123,7 @@ django==4.2.23
     #   -c https:/raw.githubusercontent.com/edx/edx-lint/master/edx_lint/files/common_constraints.txt
     #   -r requirements/quality.txt
     #   django-crum
+    #   django-model-utils
     #   django-stubs
     #   django-stubs-ext
     #   django-waffle
@@ -137,6 +138,8 @@ django-crum==0.7.9
     #   -r requirements/quality.txt
     #   edx-django-utils
     #   edx-toggles
+django-model-utils==5.0.0
+    # via -r requirements/quality.txt
 django-stubs==5.2.2
     # via
     #   -r requirements/quality.txt

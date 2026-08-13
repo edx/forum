@@ -115,6 +115,116 @@ def _build_user_cache(user_ids: set[int]) -> dict[int, User]:
     return {u.pk: u for u in User.objects.filter(pk__in=user_ids)}
 
 
+def course_user_query(
+    course_id: str, updated_since: datetime | None = None
+) -> dict[str, Any]:
+    """
+    Build the MongoDB query selecting every user document relevant to a course.
+
+    A user belongs to a course if their document carries *either* a
+    ``course_stats`` entry *or* a ``read_states`` entry for it. Selecting on
+    ``course_stats`` alone (as this code used to) silently skipped users whose
+    documents predate course stats, or whose stats were never written: those
+    users lost their ForumUser row, their course stats and — because the read
+    state pass used the same selector — their read states and last read times.
+
+    ``updated_since`` narrows the *stats* side to users active since that time,
+    but deliberately keeps two other groups:
+
+    * users whose stats entry has no usable ``last_activity_at`` (old-format
+      documents), which an ``$elemMatch`` on the timestamp would drop forever;
+    * users with read states for the course, which carry no document-level
+      timestamp to filter on.
+    """
+    if updated_since is None:
+        return {
+            "$or": [
+                {"course_stats.course_id": course_id},
+                {"read_states.course_id": course_id},
+            ]
+        }
+
+    return {
+        "$or": [
+            {
+                "course_stats": {
+                    "$elemMatch": {
+                        "course_id": course_id,
+                        "last_activity_at": {"$gte": updated_since},
+                    }
+                }
+            },
+            {
+                "course_stats": {
+                    "$elemMatch": {
+                        "course_id": course_id,
+                        "last_activity_at": {"$in": [None, ""]},
+                    }
+                }
+            },
+            {
+                "course_stats": {
+                    "$elemMatch": {
+                        "course_id": course_id,
+                        "last_activity_at": {"$exists": False},
+                    }
+                }
+            },
+            {"read_states.course_id": course_id},
+        ]
+    }
+
+
+def get_course_participant_ids(
+    db: Database[dict[str, Any]],
+    course_id: str,
+    updated_since: datetime | None = None,
+) -> set[int]:
+    """
+    Return the IDs of every user who took part in *course_id*.
+
+    A user document is not a reliable record of course membership: many carry
+    neither a ``course_stats`` nor a ``read_states`` entry for a course the user
+    demonstrably took part in. Participation is therefore read off the content
+    itself — authors, voters, abuse flaggers and editors — plus subscribers to
+    the course's threads. All of them need a ForumUser row, which is what the
+    forum's user APIs read.
+
+    ``updated_since`` restricts the content scan to items updated on or after
+    that time, matching the filter :func:`migrate_content` applies.
+    """
+    query: dict[str, Any] = {"course_id": course_id}
+    if updated_since is not None:
+        query["updated_at"] = {"$gte": updated_since}
+
+    # Projection keeps this to the fields that carry user IDs.
+    contents = list(
+        db.contents.find(
+            query,
+            {
+                "author_id": 1,
+                "deleted_by": 1,
+                "closed_by_id": 1,
+                "votes": 1,
+                "abuse_flaggers": 1,
+                "historical_abuse_flaggers": 1,
+                "edit_history": 1,
+            },
+        )
+    )
+    ids = _collect_all_user_ids(contents)
+
+    sub_query: dict[str, Any] = {"source.course_id": course_id}
+    if updated_since is not None:
+        sub_query["updated_at"] = {"$gte": updated_since}
+    for raw_id in db.subscriptions.distinct("subscriber_id", sub_query):
+        uid = _to_int_id(raw_id)
+        if uid is not None:
+            ids.add(uid)
+
+    return ids
+
+
 def _set_if_changed(obj: Any, field: str, value: Any) -> bool:
     """Set obj.<field> only when value differs; return whether a change happened."""
     if getattr(obj, field) != value:
@@ -139,22 +249,7 @@ def migrate_users(  # pylint: disable=too-many-statements
     Uses bulk_create / bulk_update instead of per-row get_or_create calls,
     reducing the number of SQL round-trips from O(N) to O(1).
     """
-    users_query: dict[str, Any]
-    if updated_since is not None:
-        users_query = {
-            "course_stats": {
-                "$elemMatch": {
-                    "course_id": course_id,
-                    "last_activity_at": {"$gte": updated_since},
-                }
-            }
-        }
-    else:
-        users_query = {"course_stats.course_id": course_id}
-
-    all_mongo_users = list(db.users.find(users_query))
-    if not all_mongo_users:
-        return
+    all_mongo_users = list(db.users.find(course_user_query(course_id, updated_since)))
 
     # Build a numeric-uid → mongo-doc map, dropping unparsable IDs.
     uid_map: dict[int, dict[str, Any]] = {}
@@ -163,11 +258,28 @@ def migrate_users(  # pylint: disable=too-many-statements
         if uid is not None:
             uid_map[uid] = u
 
-    if not uid_map:
+    # Users who took part in the course need a ForumUser row even when their
+    # document carries neither course stats nor read states for it. Pull their
+    # documents too, so their user data — the default sort key — comes across
+    # rather than silently falling back to the model default.
+    participant_ids = get_course_participant_ids(db, course_id)
+    unseen_participants = participant_ids - set(uid_map.keys())
+    if unseen_participants:
+        for u in db.users.find(
+            {"_id": {"$in": [str(uid) for uid in unseen_participants]}}
+        ):
+            uid = _to_int_id(u["_id"])
+            if uid is not None:
+                uid_map[uid] = u
+
+    if not uid_map and not participant_ids:
         return
 
     # --- Single bulk fetch of all Django users for this course ---
-    django_users = {u.pk: u for u in User.objects.filter(pk__in=uid_map.keys())}
+    django_users = {
+        u.pk: u
+        for u in User.objects.filter(pk__in=set(uid_map.keys()) | participant_ids)
+    }
 
     # --- ForumUser: create missing rows; update default_sort_key if changed ---
     existing_fu_map: dict[int, ForumUser] = {
@@ -177,7 +289,9 @@ def migrate_users(  # pylint: disable=too-many-statements
     new_forum_users = []
     fu_to_update: list[ForumUser] = []
     for uid in django_users:
-        sort_key = uid_map[uid].get("default_sort_key", "date")
+        # A participant with no user document at all still gets a row, on the
+        # model default, rather than being skipped.
+        sort_key = uid_map.get(uid, {}).get("default_sort_key") or "date"
         if uid not in existing_fu_map:
             new_forum_users.append(ForumUser(user_id=uid, default_sort_key=sort_key))
         else:
@@ -1172,7 +1286,10 @@ def migrate_read_states(db: Database[dict[str, Any]], course_id: str) -> None:
     Replaces the original per-row get_or_create / .save() loops with
     one bulk-create pass for ReadState and one for LastReadTime.
     """
-    all_mongo_users = list(db.users.find({"course_stats.course_id": course_id}))
+    # Select on read states as well as course stats: a user can have read
+    # threads in a course without ever having course stats written for it, and
+    # selecting on course stats alone dropped their read states entirely.
+    all_mongo_users = list(db.users.find(course_user_query(course_id)))
     if not all_mongo_users:
         return
 
