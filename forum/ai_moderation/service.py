@@ -2,20 +2,29 @@
 AI Moderation utilities for forum content.
 """
 
-import json
-import logging
 import hashlib
-from typing import Dict, Optional, Any
+import logging
+from typing import Any, Dict, Optional
 
-import requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ImproperlyConfigured, ObjectDoesNotExist
 from django.utils import timezone
+from django.utils.module_loading import import_string
 from opaque_keys.edx.keys import CourseKey
 from rest_framework.serializers import ValidationError
 
+from forum.ai_moderation.backends.base import (
+    SPAM_CLASSIFICATIONS,
+    BaseModerationBackend,
+    CLASSIFICATION_NOT_SPAM,
+)
+from forum.ai_moderation.defaults import (
+    DEFAULT_FLAGGED_CACHE_PREFIX,
+    DEFAULT_FLAGGED_CACHE_TTL,
+    DEFAULT_REASONING,
+)
 from forum.backends.mysql.models import ModerationAuditLog
 from forum.utils import ForumV2RequestError
 
@@ -88,7 +97,7 @@ def create_moderation_audit_log(
             timestamp=timezone.now(),
             body=content_body,  # Store full body content
             classifier_output=enhanced_moderation_result,
-            reasoning=moderation_result.get("reasoning", "No reasoning provided"),
+            reasoning=moderation_result.get("reasoning", DEFAULT_REASONING),
             classification=moderation_result.get("classification", "spam"),
             actions_taken=actions_taken,
             confidence_score=moderation_result.get("confidence_score"),
@@ -105,27 +114,108 @@ class AIModerationService:
 
     Waffle Flag "discussion.enable_ai_moderation" controls whether AI moderation is active.
 
-    XPERT AI Moderation API is used to classify content as spam or not spam.
+    Content is classified by the moderation backend named in the
+    AI_MODERATION_BACKEND setting. There is no default: forum defines the
+    interface and leaves the choice of provider to the deployment. This service
+    is provider agnostic -- everything it does with a verdict, from caching to
+    flagging to soft deletion to audit logging, is the same whichever backend
+    produced it.
     """
 
-    def __init__(self):  # type: ignore[no-untyped-def]
+    def __init__(self) -> None:
         """Initialize the AI moderation service."""
-        self.api_url = getattr(settings, "AI_MODERATION_API_URL", None)
-        self.client_id = getattr(settings, "AI_MODERATION_CLIENT_ID", None)
-        self.system_message = getattr(settings, "AI_MODERATION_SYSTEM_MESSAGE", None)
-        self.connection_timeout = getattr(
-            settings, "AI_MODERATION_CONNECTION_TIMEOUT", 30
-        )  # seconds
-        self.read_timeout = getattr(
-            settings, "AI_MODERATION_READ_TIMEOUT", 30
-        )  # seconds
-        self.ai_moderation_user_id = getattr(settings, "AI_MODERATION_USER_ID", None)
-        self.flagged_cache_ttl = getattr(
-            settings, "AI_MODERATION_FLAGGED_CACHE_TTL", 60 * 60 * 24
+        self._moderation_backend: Optional[BaseModerationBackend] = None
+        self._moderation_backend_path: Optional[str] = None
+
+    @property
+    def ai_moderation_user_id(self) -> Optional[Any]:
+        """User the moderation actions are attributed to."""
+        return getattr(settings, "AI_MODERATION_USER_ID", None)
+
+    @property
+    def flagged_cache_ttl(self) -> int:
+        """How long a spam verdict stays cached, in seconds."""
+        return getattr(
+            settings, "AI_MODERATION_FLAGGED_CACHE_TTL", DEFAULT_FLAGGED_CACHE_TTL
         )
-        self.flagged_cache_prefix = getattr(
-            settings, "AI_MODERATION_FLAGGED_CACHE_PREFIX", "ai_moderation:flagged:v1"
+
+    @property
+    def flagged_cache_prefix(self) -> str:
+        """Key prefix for cached spam verdicts."""
+        return getattr(
+            settings, "AI_MODERATION_FLAGGED_CACHE_PREFIX", DEFAULT_FLAGGED_CACHE_PREFIX
         )
+
+    @property
+    def moderation_backend_path(self) -> Optional[str]:
+        """Dotted path of the configured moderation backend, if one is configured."""
+        return getattr(settings, "AI_MODERATION_BACKEND", None)
+
+    @property
+    def moderation_backend(self) -> BaseModerationBackend:
+        """
+        The configured moderation backend.
+
+        Loaded on first use rather than in __init__ so that the module level
+        service instance does not freeze the setting at import time, and cached
+        until the configured path changes.
+
+        Raises:
+            ImproperlyConfigured: if AI_MODERATION_BACKEND is unset, or does not
+                name a usable BaseModerationBackend.
+        """
+        backend_path = self.moderation_backend_path
+        if not backend_path:
+            raise ImproperlyConfigured(
+                "AI_MODERATION_BACKEND is not configured. Forum provides the "
+                "moderation interface but no provider: set this to the dotted path "
+                "of a BaseModerationBackend subclass."
+            )
+        if (
+            self._moderation_backend is None
+            or self._moderation_backend_path != backend_path
+        ):
+            self._moderation_backend = self._load_moderation_backend(backend_path)
+            self._moderation_backend_path = backend_path
+        return self._moderation_backend
+
+    @staticmethod
+    def _load_moderation_backend(backend_path: str) -> BaseModerationBackend:
+        """Import and instantiate the moderation backend at ``backend_path``."""
+        try:
+            backend_class = import_string(backend_path)
+        except ImportError as e:
+            raise ImproperlyConfigured(
+                f"AI_MODERATION_BACKEND '{backend_path}' could not be imported: {e}"
+            ) from e
+
+        backend = backend_class()
+        if not isinstance(backend, BaseModerationBackend):
+            raise ImproperlyConfigured(
+                f"AI_MODERATION_BACKEND '{backend_path}' is not a subclass of "
+                f"{BaseModerationBackend.__module__}.{BaseModerationBackend.__name__}"
+            )
+        return backend
+
+    def _classify(self, content: str) -> Optional[Dict[str, Any]]:
+        """
+        Ask the configured backend to classify content.
+
+        Returns the moderation result, or None if the backend is unusable or
+        failed. Moderation runs inline with posting, so no backend problem is
+        allowed to propagate out of here.
+        """
+        try:
+            return self.moderation_backend.classify(content)
+        except ImproperlyConfigured as e:
+            log.error(f"AI moderation backend is not usable: {e}")
+            return None
+        except Exception:  # pylint: disable=broad-except
+            log.exception(
+                f"AI moderation backend '{self.moderation_backend_path}' "
+                f"raised an unexpected error"
+            )
+            return None
 
     def _cache_key_for_content(self, content: str) -> str:
         """Return the cache key for a given message content."""
@@ -155,78 +245,6 @@ class AIModerationService:
         except Exception:  # pylint: disable=broad-except
             log.exception("AI moderation cache write failed")
 
-    def _make_api_request(self, content: str) -> Optional[Dict[str, Any]]:
-        """
-        Make API request to XPert Service.
-
-        Args:
-            content: The text content to moderate
-
-        Returns:
-            Dictionary with 'reasoning' and 'classification' keys, or None if failed
-        """
-        if not self.api_url:
-            log.error("AI_MODERATION_API_URL setting is not configured")
-            return None
-
-        headers = {
-            "accept": "*/*",
-            "accept-language": "en-US,en;q=0.9",
-            "content-type": "application/json",
-            "user-agent": "Mozilla/5.0 (compatible; edX-Forum-AI-Moderation/1.0)",
-        }
-
-        payload = {
-            "messages": [{"role": "user", "content": content}],
-            "client_id": self.client_id,
-            "system_message": self.system_message,
-        }
-
-        try:
-            response = requests.post(
-                self.api_url,
-                headers=headers,
-                json=payload,
-                timeout=(self.connection_timeout, self.read_timeout),
-            )
-            response.raise_for_status()
-
-            response_data = response.json()
-            # Validate response data structure
-            if not isinstance(response_data, list):
-                log.error(
-                    f"Expected list response from XPert API, got {type(response_data)}"
-                )
-                return None
-
-            if len(response_data) == 0:
-                log.error("Empty response list from XPert API")
-                return None
-
-            if not isinstance(response_data[0], dict):
-                log.error(
-                    f"Expected dict in response list, got {type(response_data[0])}"
-                )
-                return None
-
-            assistant_content = response_data[0].get("content", "")
-            # Parse the JSON content from the assistant response
-            try:
-                moderation_result = json.loads(assistant_content)
-                # full API response for audit purposes
-                moderation_result["full_api_response"] = response_data
-                return moderation_result
-            except json.JSONDecodeError as e:
-                log.error(f"Failed to parse AI moderation response JSON: {e}")
-                return None
-        except (
-            requests.RequestException,
-            requests.Timeout,
-            requests.ConnectionError,
-        ) as e:
-            log.error(f"AI moderation API request failed: {e}")
-            return None
-
     def moderate_and_flag_content(
         self,
         content: str,
@@ -241,7 +259,9 @@ class AIModerationService:
             content: The text content to check
             content_instance: The content model instance (Thread or Comment)
             course_id: Optional course ID for waffle flag checking
-            backend: Backend instance for database operations
+            backend: Forum storage backend used for the database operations.
+                This is not the AI moderation backend, which is chosen by the
+                AI_MODERATION_BACKEND setting.
 
         Returns:
             Dictionary with moderation results and actions taken
@@ -249,7 +269,7 @@ class AIModerationService:
         result = {
             "is_spam": False,
             "reasoning": "AI moderation disabled or unavailable",
-            "classification": "not_spam",
+            "classification": CLASSIFICATION_NOT_SPAM,
             "actions_taken": ["no_action"],
             "flagged": False,
         }
@@ -267,18 +287,20 @@ class AIModerationService:
         # If we've already flagged this exact content before, reuse the cached result
         moderation_result = self._get_cached_flagged_result(content)
         if moderation_result is None:
-            moderation_result = self._make_api_request(content)
+            moderation_result = self._classify(content)
 
         if moderation_result is None:
             result["reasoning"] = "AI moderation API failed"
             log.warning("AI moderation API failed")
             return result
 
-        classification = moderation_result.get("classification", "not_spam")
-        reasoning = moderation_result.get("reasoning", "No reasoning provided")
-        is_spam = classification in ["spam", "spam_or_scam"]
+        classification = moderation_result.get(
+            "classification", CLASSIFICATION_NOT_SPAM
+        )
+        reasoning = moderation_result.get("reasoning", DEFAULT_REASONING)
+        is_spam = classification in SPAM_CLASSIFICATIONS
 
-        # Cache only flagged (spam) results to avoid repeated XPert calls
+        # Cache only flagged (spam) results to avoid repeated classifier calls
         if is_spam:
             self._set_cached_flagged_result(content, moderation_result)
 
@@ -299,6 +321,9 @@ class AIModerationService:
                 self._mark_as_spam_and_moderate(content_instance, backend)
                 result["actions_taken"] = ["flagged"]
                 result["flagged"] = True
+            except ImproperlyConfigured as e:
+                log.error(f"Cannot act on AI moderation verdict: {e}")
+                result["actions_taken"] = ["no_action"]
             except (AttributeError, ValueError, TypeError) as e:
                 log.error(f"Failed to flag content as spam: {e}")
                 result["actions_taken"] = ["no_action"]
@@ -333,7 +358,10 @@ class AIModerationService:
             )
         }
         if not self.ai_moderation_user_id:
-            raise ValueError("AI_MODERATION_USER_ID setting is not configured.")
+            raise ImproperlyConfigured(
+                "AI_MODERATION_USER_ID setting is not configured, so there is no user "
+                "to attribute AI moderation actions to."
+            )
         backend.flag_content_as_spam(content_type, content_id)
         backend.flag_as_abuse(str(self.ai_moderation_user_id), content_id, **extra_data)
 
@@ -374,7 +402,7 @@ class AIModerationService:
 
 
 # Global instance
-ai_moderation_service = AIModerationService()  # type: ignore[no-untyped-call]
+ai_moderation_service = AIModerationService()
 
 
 def moderate_and_flag_spam(
