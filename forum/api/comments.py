@@ -9,7 +9,7 @@ from typing import Any, Optional
 from django.core.exceptions import ObjectDoesNotExist
 from rest_framework.serializers import ValidationError
 
-from forum.ai_moderation import moderate_and_flag_spam
+from forum.ai_moderation.service import moderate_and_flag_spam
 from forum.backend import get_backend
 from forum.serializers.comment import CommentSerializer
 from forum.utils import ForumV2RequestError
