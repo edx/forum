@@ -2,6 +2,7 @@
 """Model util function for db operations."""
 
 import math
+import re
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Optional
@@ -2000,6 +2001,19 @@ class MongoBackend(AbstractBackend):
         if username_in is not None:
             kwargs["username"] = {"$in": username_in}
         return list(Users().get_list(**kwargs))
+
+    @staticmethod
+    def get_usernames_with_course_stats(
+        course_id: str, search_string: str
+    ) -> list[str]:
+        """Get usernames with stats in the course that contain search_string."""
+        users = Users().find(
+            {
+                "course_stats.course_id": course_id,
+                "username": {"$regex": re.escape(search_string), "$options": "i"},
+            }
+        )
+        return [user["username"] for user in users]
 
     @staticmethod
     def get_user_sort_criterion(sort_by: str) -> dict[str, Any]:
