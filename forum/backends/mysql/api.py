@@ -2620,6 +2620,20 @@ class MySQLBackend(AbstractBackend):
         return result
 
     @staticmethod
+    def get_usernames_with_course_stats(
+        course_id: str, search_string: str
+    ) -> list[str]:
+        """Get usernames with stats in the course that contain search_string."""
+        return list(
+            User.objects.filter(
+                course_stats__course_id=course_id,
+                username__icontains=search_string,
+            )
+            .values_list("username", flat=True)
+            .distinct()
+        )
+
+    @staticmethod
     def get_user_sort_criterion(sort_by: str) -> dict[str, Any]:
         """
         Get sort criterion based on sort_by parameter.

@@ -9,6 +9,7 @@ from typing import Any, Optional
 import pytest
 from faker import Faker
 
+from forum import api as forum_api
 from test_utils.client import APIClient
 
 fake = Faker()
@@ -260,6 +261,29 @@ def test_user_stats_filtered_by_user(api_client: Any, patched_get_backend: Any) 
     )
 
     assert res_data == expected_result
+
+
+def test_get_usernames_with_course_stats(patched_get_backend: Any) -> None:
+    """Test searching usernames of users with stats in a course."""
+    backend = patched_get_backend()
+    course_id = fake.word()
+    other_course_id = f"{course_id}-other"
+    authors_ids = [
+        backend.find_or_create_user(str(i), username=f"SearchAuthor-{i}")
+        for i in range(1, 4)
+    ]
+    backend.find_or_create_user("4", username="other-poster")
+    backend.find_or_create_user("5", username="searchauthor-no-stats")
+    for author_id in authors_ids:
+        backend.build_course_stats(author_id, course_id)
+    backend.build_course_stats("4", course_id)
+    backend.build_course_stats("5", other_course_id)
+
+    usernames = forum_api.get_usernames_with_course_stats(course_id, "searchauthor")
+    assert sorted(usernames) == ["SearchAuthor-1", "SearchAuthor-2", "SearchAuthor-3"]
+
+    # Regex special characters are matched literally.
+    assert forum_api.get_usernames_with_course_stats(course_id, "author-.") == []
 
 
 def test_user_stats_with_recency_sort(
