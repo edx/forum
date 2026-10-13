@@ -61,12 +61,17 @@ def plugin_settings(settings: Any) -> None:
     # interface and ships no provider, so a deployment must name the backend it
     # wants. Neither does AI_MODERATION_API_URL, nor AI_MODERATION_USER_ID, which
     # decides who flagging and deletion are attributed to -- no user is created for
-    # you. Whatever else a backend needs is read by that backend and deliberately
-    # not declared here: the XPert backend's AI_MODERATION_CLIENT_ID, or the
-    # credential setting of whichever provider you wrap.
+    # you. Nor does AI_MODERATION_TRUSTED_LINK_DOMAINS: which links are kept from
+    # the classifier is the deployment's call, so no domain is trusted until it
+    # lists one. Whatever else a backend needs is read by that backend and
+    # deliberately not declared here: the XPert backend's AI_MODERATION_CLIENT_ID,
+    # or the credential setting of whichever provider you wrap.
     settings.AI_MODERATION_BACKEND = getattr(settings, "AI_MODERATION_BACKEND", None)
     settings.AI_MODERATION_API_URL = getattr(settings, "AI_MODERATION_API_URL", None)
     settings.AI_MODERATION_USER_ID = getattr(settings, "AI_MODERATION_USER_ID", None)
+    settings.AI_MODERATION_TRUSTED_LINK_DOMAINS = getattr(
+        settings, "AI_MODERATION_TRUSTED_LINK_DOMAINS", []
+    )
     settings.AI_MODERATION_SYSTEM_MESSAGE = getattr(
         settings, "AI_MODERATION_SYSTEM_MESSAGE", DEFAULT_SYSTEM_MESSAGE
     )
