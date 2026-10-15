@@ -1,8 +1,14 @@
-"""Tests for removing trusted links from content before it is classified."""
+"""Tests for handling trusted links in content before it is classified."""
+
+import time
 
 import pytest
 
-from forum.ai_moderation.links import is_blank, strip_trusted_links
+from forum.ai_moderation.links import (
+    has_risk_signals,
+    is_blank,
+    strip_trusted_links,
+)
 
 TRUSTED = ("codepen.io", "github.com", "developer.mozilla.org")
 
@@ -77,6 +83,30 @@ class TestStripTrustedLinks:
 
         assert strip_trusted_links(content, TRUSTED) == "<p></p>"
 
+    def test_single_quoted_and_uppercase_anchors_are_unwrapped(self) -> None:
+        """Quote style and tag case do not matter."""
+        content = "<P>See <A HREF='https://codepen.io/learner/pen/abc'>my pen</A></P>"
+
+        assert strip_trusted_links(content, TRUSTED) == "<P>See my pen</P>"
+
+    def test_every_trusted_anchor_is_unwrapped(self) -> None:
+        """Each trusted anchor is replaced by its own text."""
+        content = (
+            '<p><a href="https://codepen.io/learner/pen/1">one</a> and '
+            '<a href="https://github.com/learner/repo">two</a></p>'
+        )
+
+        assert strip_trusted_links(content, TRUSTED) == "<p>one and two</p>"
+
+    def test_unclosed_trusted_anchor_is_left_in_place(self) -> None:
+        """
+        An anchor that is never closed keeps its tag, so the post is still
+        classified; only the trusted URL is taken out of it.
+        """
+        content = '<p><a href="https://codepen.io/learner/pen/abc">my pen</p>'
+
+        assert strip_trusted_links(content, TRUSTED) == '<p><a href="">my pen</p>'
+
     def test_untrusted_anchor_is_kept(self) -> None:
         """
         An anchor to an untrusted host is kept, even when its text is a trusted
@@ -141,3 +171,122 @@ class TestIsBlank:
     def test_content_to_classify(self, content: str) -> None:
         """Text, or any tag carrying attributes, is still worth classifying."""
         assert is_blank(content) is False
+
+
+class TestHasRiskSignals:
+    """Tests for has_risk_signals."""
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "Order now at https://top-grade-helpers.example/order",
+            "Cheap essays at www.essays.example",
+            "Best grades: bestessays.com",
+            "Message me: wa.me/15550199",
+            "Join t.me/scamgroup",
+            "Visit zoom.us.in for details",
+            "Fork it at codepen.oi/editor/Kimberley2000/pen/019f1be8",
+            "Free grades: bit.ly/free-grades",
+            "See example.zz/offer for more",
+            '<p><a href="https://evil.example/landing">register</a></p>',
+            '<p><a href="/courses/other">this</a></p>',
+            '<p><img src="https://spam.example/ad.png"></p>',
+            '<iframe src="https://evil.example"></iframe>',
+            "Email tutor@example.com for answers",
+            "Call +1-555-0199 today",
+            "Reach me on +91 98765 43210",
+            "Contact (555) 123-4567",
+            "Add me on WhatsApp",
+            "Ping me on whats app",
+            "Join our Telegram group",
+            "I am on WeChat and Viber",
+            "Join discord.gg/abc123",
+            "Everything is on linktr.ee/helper",
+            "Sign up at forms.gle/abc",
+            "Shortened: shorturl.at/abc",
+            "Email tutor at gmail dot com",
+            "Visit evil&#46;com",
+            "What\u200bsApp me",
+            "Whats-App me",
+            "Ｗｈａｔｓａｐｐ me",
+        ],
+    )
+    def test_ways_to_contact_or_redirect(self, content: str) -> None:
+        """Any other link, contact detail or messaging app is a risk signal."""
+        assert has_risk_signals(content) is True
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "",
+            "<p>Use this like fo registation : URL</p>",
+            "<p>My solution:  why is the footer not sticky?</p>",
+            "<p>Join our study session on Monday at 5pm in room 101</p>",
+            "Edit style.css and index.html, then reload",
+            'Use document.getElementById("nav") and node.js 18',
+            "body { margin: 0 auto; width: 960px; color: #333; }",
+            "e.g. flexbox, i.e. the 2024 spec, version 1.2.3",
+            "Week 3, question 5 of 10",
+            "Open src/app.js and ../css/style.css",
+            "width: calc(100% / 3);",
+        ],
+    )
+    def test_ordinary_posts(self, content: str) -> None:
+        """Everyday post text, code included, carries no risk signal."""
+        assert has_risk_signals(content) is False
+
+    def test_long_post_is_checked_quickly(self) -> None:
+        """A long post without a risk signal does not stall the request."""
+        start = time.perf_counter()
+        assert has_risk_signals("a" * 50_000) is False
+        assert time.perf_counter() - start < 1
+
+    def test_reported_case_passes_once_its_trusted_link_is_removed(self) -> None:
+        """LP-1310: a Zoom registration link with a short note."""
+        content = (
+            "<p>Use this like fo registation : "
+            '<a href="https://us02web.zoom.us/meeting/register/1eWo5EX_Qcih8SeYM5GqAA'
+            '#/registration" target="_blank" rel="noopener">URL</a></p>'
+        )
+        stripped = strip_trusted_links(content, ["zoom.us"])
+
+        assert stripped == "<p>Use this like fo registation : URL</p>"
+        assert has_risk_signals(stripped) is False
+
+    def test_scam_keeps_its_risk_once_its_trusted_link_is_removed(self) -> None:
+        """A scam that adds a trusted link still offers another way to reach it."""
+        content = (
+            "Guaranteed A grades! WhatsApp +1-555-0199 https://us02web.zoom.us/j/1"
+        )
+        stripped = strip_trusted_links(content, ["zoom.us"])
+
+        assert stripped == "Guaranteed A grades! WhatsApp +1-555-0199 "
+        assert has_risk_signals(stripped) is True
+
+
+class TestHostilePosts:
+    """
+    Moderation runs inside the request that creates a post, and posts have no
+    size limit, so link handling has to stay linear on hostile input.
+    """
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "a" * 50_000,
+            "a." * 25_000,
+            "1 " * 25_000 + "x",
+            ("whats" + " " * 50) * 1_000,
+            '<a href="x" ' * 5_000,
+            '<a href="https://codepen.io/x">y' * 2_000,
+            "</a" + " " * 50_000,
+            ("<a" + " " * 50) * 1_000,
+        ],
+    )
+    def test_hostile_post_is_handled_quickly(self, content: str) -> None:
+        """Stripping, the blank check and the risk check all finish quickly."""
+        start = time.perf_counter()
+        stripped = strip_trusted_links(content, TRUSTED)
+        is_blank(stripped)
+        has_risk_signals(stripped)
+        assert time.perf_counter() - start < 1
