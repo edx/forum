@@ -496,15 +496,84 @@ class TestAIModerationTrustedLinks:  # pylint: disable=redefined-outer-name,unus
         with patch.object(ai_service.moderation_backend, "classify", classify):
             result = ai_service.moderate_and_flag_content(
                 '<p>My pen: <a href="https://codepen.io/learner/pen/abc">'
-                "https://codepen.io/learner/pen/abc</a> - why won't it center?</p>",
+                "https://codepen.io/learner/pen/abc</a> - notes at "
+                "https://example.com/notes</p>",
                 sample_comment_content,
                 course_id="course-v1:W3Cx+CSS.0x+2T2025",
                 backend=backend,
             )
 
-        classify.assert_called_once_with("<p>My pen:  - why won't it center?</p>")
+        classify.assert_called_once_with(
+            "<p>My pen:  - notes at https://example.com/notes</p>"
+        )
         assert result["is_spam"] is False
         backend.flag_content_as_spam.assert_not_called()
+
+    def test_trusted_links_without_other_contact_are_not_classified(
+        self,
+        ai_service: AIModerationService,
+        mock_waffle_flags: dict[str, Mock],
+        sample_comment_content: dict[str, Any],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """
+        A post whose links are all trusted, and that offers no other way to be
+        contacted or redirected, is not spam however vague its wording.
+        """
+        classify = Mock(
+            return_value={"classification": "spam_or_scam", "reasoning": "Vague"}
+        )
+        backend = Mock()
+
+        caplog.set_level("INFO", logger="forum.ai_moderation.service")
+
+        with patch.object(ai_service.moderation_backend, "classify", classify):
+            result = ai_service.moderate_and_flag_content(
+                "<p>Use this like fo registation : "
+                '<a href="https://codepen.io/learner/pen/abc#/registration" '
+                'target="_blank" rel="noopener">URL</a></p>',
+                sample_comment_content,
+                course_id="course-v1:W3Cx+CSS.0x+2T2025",
+                backend=backend,
+            )
+
+        classify.assert_not_called()
+        assert result["is_spam"] is False
+        assert result["actions_taken"] == ["no_action"]
+        backend.flag_content_as_spam.assert_not_called()
+        backend.flag_as_abuse.assert_not_called()
+        assert "AI moderation skipped, only trusted links: comment456" in caplog.text
+
+    @pytest.mark.parametrize(
+        "other_contact",
+        [
+            "WhatsApp +1-555-0199",
+            "mail me at tutor@example.com",
+            "or see https://example.com/offer",
+            "and codepen.oi/editor/Kimberley2000/pen/019f",
+        ],
+    )
+    def test_trusted_links_with_other_contact_are_classified(
+        self,
+        ai_service: AIModerationService,
+        mock_waffle_flags: dict[str, Mock],
+        sample_comment_content: dict[str, Any],
+        other_contact: str,
+    ) -> None:
+        """Any other way to reach or redirect readers sends the post to the classifier."""
+        classify = Mock(
+            return_value={"classification": "not_spam", "reasoning": "Legitimate"}
+        )
+
+        with patch.object(ai_service.moderation_backend, "classify", classify):
+            ai_service.moderate_and_flag_content(
+                f"Register here: https://codepen.io/pen/1 {other_contact}",
+                sample_comment_content,
+                course_id="course-v1:W3Cx+CSS.0x+2T2025",
+                backend=Mock(),
+            )
+
+        classify.assert_called_once_with(f"Register here:  {other_contact}")
 
     def test_spam_with_a_trusted_link_is_still_flagged(
         self,

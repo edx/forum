@@ -25,7 +25,11 @@ from forum.ai_moderation.defaults import (
     DEFAULT_FLAGGED_CACHE_TTL,
     DEFAULT_REASONING,
 )
-from forum.ai_moderation.links import is_blank, strip_trusted_links
+from forum.ai_moderation.links import (
+    has_risk_signals,
+    is_blank,
+    strip_trusted_links,
+)
 from forum.backends.mysql.models import ModerationAuditLog
 from forum.utils import ForumV2RequestError
 
@@ -292,10 +296,21 @@ class AIModerationService:
 
         # The classifier cannot tell a link to a trusted domain from link spam,
         # so it only gets to see the rest of the post.
-        content = strip_trusted_links(content, self.trusted_link_domains)
-        if is_blank(content):
+        stripped = strip_trusted_links(content, self.trusted_link_domains)
+        if is_blank(stripped):
             result["reasoning"] = "Nothing to classify once trusted links are removed"
             return result
+        # A post sharing trusted links that offers no other way to be contacted
+        # or redirected is not spam, however its wording reads to the classifier.
+        if stripped != content and not has_risk_signals(stripped):
+            # Skipped posts get no audit log entry, so this is the only record
+            # of how often the trusted-link exemption is used, or abused.
+            log.info(
+                f"AI moderation skipped, only trusted links: {content_instance.get('_id')}"
+            )
+            result["reasoning"] = "Only trusted links, and no other contact or link"
+            return result
+        content = stripped
 
         # If we've already flagged this exact content before, reuse the cached result
         moderation_result = self._get_cached_flagged_result(content)
