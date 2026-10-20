@@ -7,10 +7,8 @@ from typing import Any
 
 from django.contrib.auth import get_user_model
 from rest_framework import status
-from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from forum.api.bans import ban_user, get_ban, get_banned_users, unban_user
 from forum.backends.mysql.models import DiscussionBan
@@ -20,6 +18,7 @@ from forum.serializers.bans import (
     BanUserSerializer,
     UnbanUserSerializer,
 )
+from forum.views.base import ForumAPIView
 from forum.views.telemetry import (
     forum_error_type,
     set_custom_attribute,
@@ -39,7 +38,7 @@ def _get_request_value(data: Any, key: str) -> str:
     return str(value) if value is not None else ""
 
 
-class BanUserAPIView(APIView):
+class BanUserAPIView(ForumAPIView):
     """
     API View to ban a user from discussions.
 
@@ -68,8 +67,6 @@ class BanUserAPIView(APIView):
             "banned_by": {"id": 456, "username": "moderator"}
         }
     """
-
-    permission_classes = (AllowAny,)
 
     def post(self, request: Request) -> Response:
         """Ban a user from discussions."""
@@ -137,7 +134,7 @@ class BanUserAPIView(APIView):
             )
 
 
-class UnbanUserAPIView(APIView):
+class UnbanUserAPIView(ForumAPIView):
     """
     API View to unban a user from discussions.
 
@@ -159,8 +156,6 @@ class UnbanUserAPIView(APIView):
             "exception": null
         }
     """
-
-    permission_classes = (AllowAny,)
 
     def post(self, request: Request, ban_id: int) -> Response:
         """Unban a user from discussions."""
@@ -247,7 +242,7 @@ class UnbanUserAPIView(APIView):
             )
 
 
-class BannedUsersAPIView(APIView):
+class BannedUsersAPIView(ForumAPIView):
     """
     API View to list banned users.
 
@@ -275,8 +270,6 @@ class BannedUsersAPIView(APIView):
             }
         ]
     """
-
-    permission_classes = (AllowAny,)
 
     def get(self, request: Request) -> Response:
         """Get list of banned users."""
@@ -322,7 +315,7 @@ class BannedUsersAPIView(APIView):
             )
 
 
-class BanDetailAPIView(APIView):
+class BanDetailAPIView(ForumAPIView):
     """
     API View to get details of a specific ban.
 
@@ -343,8 +336,6 @@ class BanDetailAPIView(APIView):
             "unbanned_by": null
         }
     """
-
-    permission_classes = (AllowAny,)
 
     def get(self, request: Request, ban_id: int) -> Response:
         """Get details of a specific ban."""

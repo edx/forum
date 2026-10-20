@@ -4,10 +4,8 @@ import logging
 from typing import Any
 
 from rest_framework import status
-from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from forum.api.threads import (
     create_thread,
@@ -25,19 +23,18 @@ from forum.views.telemetry import (
     set_forum_trace_outcome,
     set_forum_update_fields,
 )
+from forum.views.base import ForumAPIView
 
 log = logging.getLogger(__name__)
 
 
-class ThreadsAPIView(APIView):
+class ThreadsAPIView(ForumAPIView):
     """
     API view to handle operations related to threads.
 
     This view uses the CommentThread model for database interactions and the ThreadSerializer
     for serializing and deserializing data.
     """
-
-    permission_classes = (AllowAny,)
 
     def get(self, request: Request, thread_id: str) -> Response:
         """
@@ -141,15 +138,13 @@ class ThreadsAPIView(APIView):
         return Response(serialized_data, status=status.HTTP_200_OK)
 
 
-class CreateThreadAPIView(APIView):
+class CreateThreadAPIView(ForumAPIView):
     """
     API view to create a new thread.
 
     This view uses the CommentThread model for database interactions and the ThreadSerializer
     for serializing and deserializing data.
     """
-
-    permission_classes = (AllowAny,)
 
     def post(self, request: Request) -> Response:
         """
@@ -190,14 +185,12 @@ class CreateThreadAPIView(APIView):
         return Response(serialized_data, status=status.HTTP_200_OK)
 
 
-class UserThreadsAPIView(APIView):
+class UserThreadsAPIView(ForumAPIView):
     """
     API View for getting all threads of a course.
 
     This view provides an endpoint for retrieving all threads based on course id.
     """
-
-    permission_classes = (AllowAny,)
 
     def get(self, request: Request) -> Response:
         """
