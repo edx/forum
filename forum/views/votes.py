@@ -5,7 +5,6 @@ Vote Views
 from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from forum.api.votes import (
     delete_comment_vote,
@@ -21,9 +20,10 @@ from forum.views.telemetry import (
     set_forum_trace_context,
     set_forum_trace_outcome,
 )
+from forum.views.base import ForumAPIView
 
 
-class ThreadVoteView(APIView):
+class ThreadVoteView(ForumAPIView):
     """
     API view to handle voting on threads.
 
@@ -117,7 +117,7 @@ class ThreadVoteView(APIView):
         return Response(thread_response, status=status.HTTP_200_OK)
 
 
-class CommentVoteView(APIView):
+class CommentVoteView(ForumAPIView):
     """
     API view to handle voting on comments.
 
