@@ -14,6 +14,18 @@ Change Log
 Unreleased
 **********
 
+*
+
+0.7.5 – 2026-10-29
+******************
+
+Added
+-----
+
+* ``forum.api.get_usernames_with_course_stats`` returns the usernames in a
+  course that match a search string and have discussion stats there, including
+  users who posted in the course without being enrolled in it.
+
 Security
 --------
 

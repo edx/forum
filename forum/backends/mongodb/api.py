@@ -2007,13 +2007,13 @@ class MongoBackend(AbstractBackend):
         course_id: str, search_string: str
     ) -> list[str]:
         """Get usernames with stats in the course that contain search_string."""
-        users = Users().find(
+        return Users().distinct(
+            "username",
             {
                 "course_stats.course_id": course_id,
                 "username": {"$regex": re.escape(search_string), "$options": "i"},
-            }
+            },
         )
-        return [user["username"] for user in users]
 
     @staticmethod
     def get_user_sort_criterion(sort_by: str) -> dict[str, Any]:
