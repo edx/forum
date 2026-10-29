@@ -324,6 +324,16 @@ def _get_stats_for_usernames(
     return sorted(stats_query, key=lambda u: usernames.index(u["username"]))
 
 
+def get_usernames_with_course_stats(course_id: str, search_string: str) -> list[str]:
+    """
+    Get usernames of users with discussion stats in the course matching search_string.
+
+    This includes users who have posted in the course but are not enrolled in it.
+    """
+    backend = get_backend(course_id)()
+    return backend.get_usernames_with_course_stats(course_id, search_string)
+
+
 def get_user_course_stats(
     course_id: str,
     usernames: Optional[str] = None,

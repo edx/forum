@@ -417,6 +417,13 @@ class AbstractBackend:
         raise NotImplementedError
 
     @staticmethod
+    def get_usernames_with_course_stats(
+        course_id: str, search_string: str
+    ) -> list[str]:
+        """Get usernames with stats in the course that contain search_string."""
+        raise NotImplementedError
+
+    @staticmethod
     def get_user_sort_criterion(sort_by: str) -> dict[str, Any]:
         """Get sort criterion."""
         raise NotImplementedError
