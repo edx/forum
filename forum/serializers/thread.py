@@ -90,6 +90,7 @@ class ThreadSerializer(ContentSerializer):
             "merge_question_type_responses", False
         )
         self.show_deleted = self.context_data.pop("show_deleted", False)
+        self._read_state_cache: dict[tuple[str, str, str], tuple[bool, int]] = {}
 
         # Customize fields based on context
         if not self.with_responses:
@@ -121,18 +122,8 @@ class ThreadSerializer(ContentSerializer):
             Optional[bool]: True if the thread is read, otherwise False or None.
         """
         if self.include_read_state:
-            # Always calculate fresh read state from backend to ensure accuracy
-            user_id = self.context_data.get("user_id", None)
-            # Don't return read state if no user_id (can't calculate without a user)
-            if not user_id:
-                return None
-            course_id = obj["course_id"]
-            # Convert _id to string for consistent lookup (MongoDB returns string keys)
-            thread_key = str(obj["_id"])
-            is_read, _ = self.backend.get_read_states(
-                [thread_key], user_id, course_id
-            ).get(thread_key, (False, obj["comment_count"]))
-            return is_read
+            read_state = self._get_read_state(obj)
+            return read_state[0] if read_state is not None else None
         return None
 
     def get_unread_comments_count(self, obj: dict[str, Any]) -> Optional[int]:
@@ -146,19 +137,42 @@ class ThreadSerializer(ContentSerializer):
             Optional[int]: The number of unread comments or None.
         """
         if self.include_read_state:
-            # Always calculate fresh unread count from backend to ensure accuracy
-            user_id = self.context_data.get("user_id", None)
-            # Don't return unread count if no user_id (can't calculate without a user)
-            if not user_id:
-                return None
-            course_id = obj["course_id"]
-            # Convert _id to string for consistent lookup (MongoDB returns string keys)
-            thread_key = str(obj["_id"])
-            _, unread_count = self.backend.get_read_states(
+            read_state = self._get_read_state(obj)
+            return read_state[1] if read_state is not None else None
+        return None
+
+    def _get_read_state(self, obj: dict[str, Any]) -> Optional[tuple[bool, int]]:
+        """
+        Return (is_read, unread_comments_count) for the thread, or None without a user.
+
+        The read state is always worked out fresh in this request, never taken from
+        the stored thread. It comes from the "read_states" context map when the
+        backend computed it for the whole page, or else from one backend call per
+        thread, which is cached so that `read` and `unread_comments_count` share it.
+        Both are keyed by (user, course, thread), so a value is only used for the
+        user and course it was computed for. The cache lives as long as this
+        serializer, which is one serialization.
+        """
+        user_id = self.context_data.get("user_id", None)
+        # Don't return read state if no user_id (can't calculate without a user)
+        if not user_id:
+            return None
+        # Convert _id to string for consistent lookup (MongoDB returns string keys)
+        thread_key = str(obj["_id"])
+        cache_key = (str(user_id), obj["course_id"], thread_key)
+
+        precomputed = self.context_data.get("read_states") or {}
+        if cache_key in precomputed:
+            is_read, unread_count = precomputed[cache_key]
+            return is_read, unread_count
+
+        course_id = obj["course_id"]
+        if cache_key not in self._read_state_cache:
+            is_read, unread_count = self.backend.get_read_states(
                 [thread_key], user_id, course_id
             ).get(thread_key, (False, obj["comment_count"]))
-            return unread_count
-        return None
+            self._read_state_cache[cache_key] = (is_read, unread_count)
+        return self._read_state_cache[cache_key]
 
     def get_endorsed(self, obj: dict[str, Any]) -> Optional[bool]:
         """

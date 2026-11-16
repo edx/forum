@@ -222,12 +222,13 @@ class Content(models.Model):
             "count": 0,
             "point": 0,
         }
-        for vote in self.votes:
-            if vote.vote == 1:
-                votes["up"].append(vote.user.pk)
+        # user_id avoids loading each voter's User row (one query per vote).
+        for user_id, vote in self.votes.values_list("user_id", "vote"):
+            if vote == 1:
+                votes["up"].append(user_id)
                 votes["up_count"] += 1
-            elif vote.vote == -1:
-                votes["down"].append(vote.user.pk)
+            elif vote == -1:
+                votes["down"].append(user_id)
                 votes["down_count"] += 1
             votes["point"] = votes["up_count"] - votes["down_count"]
             votes["count"] = votes["count"]
@@ -311,7 +312,7 @@ class CommentThread(Content):
     def to_dict(self) -> dict[str, Any]:
         """Return a dictionary representation of the model."""
         edit_history = []
-        for edit in self.edit_history.all():
+        for edit in self.edit_history.select_related("editor"):
             edit_history.append(
                 {
                     "_id": str(edit.pk),
@@ -323,6 +324,8 @@ class CommentThread(Content):
                 }
             )
 
+        # Foreign keys are read through their *_id columns so that no related
+        # row is loaded just to get its primary key.
         return {
             "_id": str(self.pk),
             "votes": self.get_votes,
@@ -344,9 +347,9 @@ class CommentThread(Content):
             "anonymous": self.anonymous,
             "anonymous_to_peers": self.anonymous_to_peers,
             "closed": self.closed,
-            "closed_by_id": str(self.closed_by.pk) if self.closed_by else None,
+            "closed_by_id": str(self.closed_by_id) if self.closed_by_id else None,
             "close_reason_code": self.close_reason_code,
-            "author_id": str(self.author.pk),
+            "author_id": str(self.author_id),
             "author_username": self.author_username
             or self.retired_username
             or self.author.username,
@@ -358,7 +361,7 @@ class CommentThread(Content):
             "is_spam": self.is_spam,
             "is_deleted": self.is_deleted,
             "deleted_at": self.deleted_at,
-            "deleted_by": str(self.deleted_by.pk) if self.deleted_by else None,
+            "deleted_by": str(self.deleted_by_id) if self.deleted_by_id else None,
         }
 
     def doc_to_hash(self) -> dict[str, Any]:
@@ -500,7 +503,7 @@ class Comment(Content):
     def to_dict(self) -> dict[str, Any]:
         """Return a dictionary representation of the model."""
         edit_history = []
-        for edit in self.edit_history.all():
+        for edit in self.edit_history.select_related("editor"):
             edit_history.append(
                 {
                     "_id": str(edit.pk),
@@ -526,7 +529,7 @@ class Comment(Content):
                 str(flagger) for flagger in self.historical_abuse_flaggers
             ],
             "parent_ids": self.get_parent_ids(),
-            "parent_id": str(self.parent.pk) if self.parent else "None",
+            "parent_id": str(self.parent_id) if self.parent_id else "None",
             "at_position_list": [],
             "body": self.body,
             "course_id": self.course_id,
@@ -534,8 +537,8 @@ class Comment(Content):
             "endorsed": self.endorsed,
             "anonymous": self.anonymous,
             "anonymous_to_peers": self.anonymous_to_peers,
-            "author_id": str(self.author.pk),
-            "comment_thread_id": str(self.comment_thread.pk),
+            "author_id": str(self.author_id),
+            "comment_thread_id": str(self.comment_thread_id),
             "child_count": self.child_count,
             "author_username": self.author_username
             or self.retired_username
@@ -547,7 +550,7 @@ class Comment(Content):
             "is_spam": self.is_spam,
             "is_deleted": self.is_deleted,
             "deleted_at": self.deleted_at,
-            "deleted_by": str(self.deleted_by.pk) if self.deleted_by else None,
+            "deleted_by": str(self.deleted_by_id) if self.deleted_by_id else None,
         }
         if edit_history:
             data["edit_history"] = edit_history
@@ -700,10 +703,10 @@ class ReadState(models.Model):
     def to_dict(self) -> dict[str, Any]:
         """Return a dictionary representation of the model."""
         last_read_times = {}
-        for last_read_time in self.last_read_times.all():
-            last_read_times[str(last_read_time.comment_thread.pk)] = (
-                last_read_time.timestamp
-            )
+        for thread_id, timestamp in self.last_read_times.values_list(
+            "comment_thread_id", "timestamp"
+        ):
+            last_read_times[str(thread_id)] = timestamp
         return {
             "_id": str(self.pk),
             "last_read_times": last_read_times,
