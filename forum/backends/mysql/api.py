@@ -19,10 +19,13 @@ from django.db.models import (
     Max,
     OuterRef,
     Q,
+    QuerySet,
     Subquery,
     Sum,
+    Value,
     When,
 )
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -542,15 +545,13 @@ class MySQLBackend(AbstractBackend):
                 )
             )
             .filter(abuse_flaggers_count__gt=0)
+            .values_list("comment_thread_id", "abuse_flaggers_count")
         )
 
-        result = {}
-        for comment in abuse_flagged_comments:
-            thread_pk = str(comment.comment_thread.pk)
-            if thread_pk not in result:
-                result[thread_pk] = 0
-            abuse_flaggers = "abuse_flaggers_count"
-            result[thread_pk] += getattr(comment, abuse_flaggers)
+        result: dict[str, int] = {}
+        for thread_id, abuse_flaggers_count in abuse_flagged_comments:
+            thread_pk = str(thread_id)
+            result[thread_pk] = result.get(thread_pk, 0) + abuse_flaggers_count
 
         return result
 
@@ -574,33 +575,47 @@ class MySQLBackend(AbstractBackend):
         # Return empty if no user_id - can't calculate read state without a user
         if user_id == "" or user_id is None:
             return read_states
-        try:
-            user = User.objects.get(pk=user_id)
-        except User.DoesNotExist:
-            return read_states
 
-        threads = CommentThread.objects.filter(pk__in=thread_ids)
-        read_state = ReadState.objects.filter(user=user, course_id=course_id).first()
+        read_state = ReadState.objects.filter(
+            user__pk=user_id, course_id=course_id
+        ).first()
         if not read_state:
             return read_states
 
-        read_dates = read_state.last_read_times
+        # A fixed number of queries for the whole list, not two per thread.
+        read_dates = dict(
+            LastReadTime.objects.filter(
+                read_state=read_state, comment_thread__pk__in=thread_ids
+            ).values_list("comment_thread_id", "timestamp")
+        )
+        if not read_dates:
+            return read_states
 
-        for thread in threads:
-            read_date = read_dates.filter(comment_thread=thread).first()
-            if not read_date:
-                continue
-
-            last_activity_at = thread.last_activity_at
-            is_read = read_date.timestamp >= last_activity_at
-            unread_comment_count = (
-                Comment.objects.filter(
-                    comment_thread=thread, created_at__gte=read_date.timestamp
-                )
-                .exclude(author__pk=user_id)
-                .count()
+        last_activity_dates = dict(
+            CommentThread.objects.filter(pk__in=read_dates.keys()).values_list(
+                "pk", "last_activity_at"
             )
-            read_states[str(thread.pk)] = [is_read, unread_comment_count]
+        )
+
+        # Comments newer than the user's read time for their thread. Joining the
+        # read records keeps this one condition however many threads there are.
+        # (read_state, comment_thread) is unique, so the join adds no extra rows.
+        unread_counts = dict(
+            Comment.objects.filter(
+                comment_thread__pk__in=read_dates.keys(),
+                comment_thread__lastreadtime__read_state=read_state,
+                created_at__gte=F("comment_thread__lastreadtime__timestamp"),
+            )
+            .exclude(author__pk=user_id)
+            .order_by()
+            .values("comment_thread_id")
+            .annotate(total=Count("pk"))
+            .values_list("comment_thread_id", "total")
+        )
+
+        for thread_pk, last_activity_at in last_activity_dates.items():
+            is_read = read_dates[thread_pk] >= last_activity_at
+            read_states[str(thread_pk)] = [is_read, unread_counts.get(thread_pk, 0)]
         return read_states
 
     @staticmethod
@@ -645,11 +660,14 @@ class MySQLBackend(AbstractBackend):
         Returns:
             dict[str, bool]: A dictionary of thread IDs to their endorsed status (True if endorsed, False otherwise).
         """
-        endorsed_comments = Comment.objects.filter(
-            comment_thread__pk__in=thread_ids, endorsed=True
+        endorsed_thread_ids = (
+            Comment.objects.filter(comment_thread__pk__in=thread_ids, endorsed=True)
+            .order_by()
+            .values_list("comment_thread_id", flat=True)
+            .distinct()
         )
 
-        return {str(comment.comment_thread.pk): True for comment in endorsed_comments}
+        return {str(thread_id): True for thread_id in endorsed_thread_ids}
 
     @staticmethod
     def get_user_read_state_by_course_id(
@@ -705,6 +723,53 @@ class MySQLBackend(AbstractBackend):
             return sort_criteria
         else:
             return []
+
+    @staticmethod
+    def _annotate_sort_fields(
+        queryset: QuerySet[CommentThread], sort_criteria: list[str]
+    ) -> QuerySet[CommentThread]:
+        """
+        Add the computed fields that the sort criteria refer to, and nothing else.
+
+        Each value comes from a correlated subquery. Joining the votes and comments
+        tables directly would multiply the rows per thread (votes x comments) and
+        force a GROUP BY over every thread in the course.
+
+        ``votes_point`` is the sum of the thread's votes (up minus down, 0 without
+        votes), as with the MongoDB backend. The joined version used SUM(DISTINCT)
+        to undo the row multiplication, which made every voted thread score 1.
+        ``comments_count`` counts every comment on the thread.
+        """
+        if "-votes_point" in sort_criteria:
+            votes_point = (
+                UserVote.objects.filter(
+                    content_type=ContentType.objects.get_for_model(CommentThread),
+                    content_object_id=OuterRef("pk"),
+                )
+                .order_by()
+                .values("content_object_id")
+                .annotate(total=Sum("vote"))
+                .values("total")
+            )
+            queryset = queryset.annotate(
+                votes_point=Coalesce(
+                    Subquery(votes_point, output_field=IntegerField()), Value(0)
+                )
+            )
+        if "-comments_count" in sort_criteria:
+            comments_count = (
+                Comment.objects.filter(comment_thread=OuterRef("pk"))
+                .order_by()
+                .values("comment_thread")
+                .annotate(total=Count("pk"))
+                .values("total")
+            )
+            queryset = queryset.annotate(
+                comments_count=Coalesce(
+                    Subquery(comments_count, output_field=IntegerField()), Value(0)
+                )
+            )
+        return queryset
 
     # TODO: Make this function modular
     # pylint: disable=too-many-nested-blocks,too-many-statements
@@ -839,10 +904,10 @@ class MySQLBackend(AbstractBackend):
                 thread_type="question",
             ).exclude(pk__in=endorsed_threads)
 
-        # Unresponded threads filtering
+        # Unresponded threads filtering: threads with no comments at all.
         if filter_unresponded:
-            base_query = base_query.annotate(num_comments=Count("comment")).filter(
-                num_comments=0
+            base_query = base_query.filter(
+                ~Exists(Comment.objects.filter(comment_thread=OuterRef("pk")))
             )
         # filter by topics: if commentable_ids are provided, commentable_id is basically topic id
         # For moderators: show all topics (no filtering by commentable_ids)
@@ -851,22 +916,16 @@ class MySQLBackend(AbstractBackend):
             base_query = base_query.filter(
                 commentable_id__in=commentable_ids,
             )
-        base_query = base_query.annotate(
-            votes_point=Sum("uservote__vote"),
-            comments_count=Count("comment", distinct=True),
-        )
 
-        base_query = base_query.annotate(
-            votes_point=Sum("uservote__vote", distinct=True),
-            comments_count=Count("comment", distinct=True),
-        )
+        # Count before any sort annotation so it stays a plain COUNT(*).
+        thread_count = base_query.count()
 
         sort_criteria = cls.get_sort_criteria(sort_key)
-
-        comment_threads = (
-            base_query.order_by(*sort_criteria) if sort_criteria else base_query
+        # "-pk" breaks exact ties (and orders an unknown sort key), so the
+        # LIMIT/OFFSET pages never overlap or skip a thread.
+        comment_threads = cls._annotate_sort_fields(base_query, sort_criteria).order_by(
+            *sort_criteria, "-pk"
         )
-        thread_count = base_query.count()
 
         if raw_query:
             return {
@@ -884,27 +943,31 @@ class MySQLBackend(AbstractBackend):
             to_skip = (page - 1) * per_page
             has_more = False
 
-            for thread in comment_threads.iterator():
-                thread_key = str(thread.pk)
+            for thread_pk, last_activity_at in comment_threads.values_list(
+                "pk", "last_activity_at"
+            ).iterator():
+                thread_key = str(thread_pk)
                 if (
                     thread_key not in read_dates
-                    or read_dates[thread_key] < thread.last_activity_at
+                    or read_dates[thread_key] < last_activity_at
                 ):
                     if skipped >= to_skip:
                         if len(threads) == per_page:
                             has_more = True
                             break
-                        threads.append(thread.pk)
+                        threads.append(thread_key)
                     else:
                         skipped += 1
             num_pages = page + 1 if has_more else page
         else:
-            threads = [thread.pk for thread in comment_threads]
             page = max(1, page)
             start = per_page * (page - 1)
             end = per_page * page
-            paginated_collection = threads[start:end]
-            threads = list(paginated_collection)
+            # Page in the database instead of loading every thread in the course.
+            threads = [
+                str(thread_pk)
+                for thread_pk in comment_threads.values_list("pk", flat=True)[start:end]
+            ]
             num_pages = max(1, math.ceil(thread_count / per_page))
 
         if len(threads) == 0:
@@ -925,29 +988,36 @@ class MySQLBackend(AbstractBackend):
     def prepare_thread(
         thread_id: str,
         is_read: bool,
-        unread_count: int,
+        unread_count: Optional[int],
         is_endorsed: bool,
         abuse_flagged_count: int,
+        thread: Optional[CommentThread] = None,
     ) -> dict[str, Any]:
         """
         Prepares thread data for presentation.
 
         Args:
-            thread (dict[str, Any]): The thread data.
+            thread_id (str): The thread's id, used to load it when `thread` is not given.
             is_read (bool): Whether the thread is read.
-            unread_count (int): The count of unread comments.
+            unread_count (Optional[int]): The count of unread comments. None means the
+                user has no read record for the thread, so every comment is unread.
             is_endorsed (bool): Whether the thread is endorsed.
             abuse_flagged_count (int): The abuse flagged count.
+            thread (Optional[CommentThread]): The thread, if the caller already loaded it.
 
         Returns:
             dict[str, Any]: A dictionary representing the prepared thread data.
         """
-        thread = CommentThread.objects.get(pk=thread_id)
+        if thread is None:
+            thread = CommentThread.objects.get(pk=thread_id)
+        thread_data = thread.to_dict()
         return {
-            **thread.to_dict(),
+            **thread_data,
             "type": "thread",
             "read": is_read,
-            "unread_comments_count": unread_count,
+            "unread_comments_count": (
+                thread_data["comment_count"] if unread_count is None else unread_count
+            ),
             "endorsed": is_endorsed,
             "abuse_flagged_count": abuse_flagged_count,
         }
@@ -972,7 +1042,11 @@ class MySQLBackend(AbstractBackend):
         Returns:
             list[dict[str, Any]]: A list of prepared thread data.
         """
-        threads = CommentThread.objects.filter(pk__in=thread_ids)
+        # One query for the whole page, in place of two lookups per thread.
+        threads_by_key = {
+            str(thread.pk): thread
+            for thread in CommentThread.objects.filter(pk__in=thread_ids)
+        }
         read_states = cls.get_read_states(thread_ids, user_id, course_id)
         threads_endorsed = cls.get_endorsed(thread_ids)
         threads_flagged = (
@@ -981,19 +1055,21 @@ class MySQLBackend(AbstractBackend):
 
         presenters = []
         for thread_id in thread_ids:
-            thread = threads.get(id=thread_id)
-            is_read, unread_count = read_states.get(
-                thread.pk, (False, thread.comment_count)
-            )
-            is_endorsed = threads_endorsed.get(thread.pk, False)
-            abuse_flagged_count = threads_flagged.get(str(thread.pk), 0)
+            # The helpers above key their results by str(pk).
+            thread_key = str(thread_id)
+            thread = threads_by_key.get(thread_key)
+            if thread is None:
+                continue
+            # No read record: unread, with every comment unread (counted by prepare_thread).
+            is_read, unread_count = read_states.get(thread_key, (False, None))
             presenters.append(
                 cls.prepare_thread(
-                    thread.pk,
+                    thread_key,
                     is_read,
                     unread_count,
-                    is_endorsed,
-                    abuse_flagged_count,
+                    threads_endorsed.get(thread_key, False),
+                    threads_flagged.get(thread_key, 0),
+                    thread=thread,
                 )
             )
 
@@ -1244,6 +1320,17 @@ class MySQLBackend(AbstractBackend):
         }
         if user_id:
             context["user_id"] = user_id
+            # threads_presentor has just worked these out for this page, in this
+            # request, so the serializer can use them instead of querying per thread.
+            # Keyed like the serializer's cache, (user, course, thread), so they are
+            # only used for the same user and course they were computed for.
+            context["read_states"] = {
+                (str(user_id), params["course_id"], str(thread["_id"])): (
+                    thread["read"],
+                    thread["unread_comments_count"],
+                )
+                for thread in threads["collection"]
+            }
         serializer = serializer(
             threads.pop("collection"), many=True, context=context, backend=cls
         )
@@ -2441,7 +2528,11 @@ class MySQLBackend(AbstractBackend):
             is_deleted=False
         )  # Exclude soft deleted threads
         if ids_only:
-            return [{"_id": str(thread.pk)} for thread in threads]
+            # Only the ids are needed, so don't load full rows (titles, bodies).
+            return [
+                {"_id": str(thread_id)}
+                for thread_id in threads.values_list("pk", flat=True)
+            ]
         return [thread.to_dict() for thread in threads]
 
     @staticmethod

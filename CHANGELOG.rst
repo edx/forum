@@ -16,6 +16,26 @@ Unreleased
 
 *
 
+0.7.6 – 2026-11-16
+******************
+
+Fixed
+-----
+
+* MySQL backend: listing a course's threads no longer loads every thread in the
+  course. The page is now selected in the database, and the vote and comment
+  counts used for sorting come from subqueries, not joins that multiplied the
+  rows per thread. In large courses the "All posts" list took about 45 seconds
+  to load (LP-1549).
+* MySQL backend: the votes sort now orders threads by their vote total (up
+  minus down, 0 without votes), as with the MongoDB backend. It summed distinct
+  vote values, so every thread with up votes scored the same.
+* MySQL backend: building one page of threads no longer runs queries per vote,
+  per edit or per thread for read state, endorsement and abuse flags. The thread
+  serializer reuses the read state already computed for the page.
+* MySQL backend: threads with an endorsed response are now listed as endorsed,
+  as they are with the MongoDB backend.
+
 0.7.5 – 2026-10-29
 ******************
 
